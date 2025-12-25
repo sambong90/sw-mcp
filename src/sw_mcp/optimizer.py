@@ -30,13 +30,14 @@ def filter_rune_by_slot(runes: List[Rune], slot: int, target: str = "B") -> List
 
 class DPState:
     """DP 상태"""
-    def __init__(self, count_rage_fatal: int = 0, count_blade: int = 0, 
-                 has_intangible: bool = False, cr: float = 0.0, cd: float = 0.0,
+    def __init__(self, count_rage: int = 0, count_fatal: int = 0, count_blade: int = 0,
+                 count_intangible: int = 0, cr: float = 0.0, cd: float = 0.0,
                  atk_pct: float = 0.0, atk_flat: float = 0.0, spd: float = 0.0,
                  rune_ids: Tuple[int, ...] = ()):
-        self.count_rage_fatal = count_rage_fatal
+        self.count_rage = count_rage
+        self.count_fatal = count_fatal
         self.count_blade = count_blade
-        self.has_intangible = has_intangible
+        self.count_intangible = count_intangible
         self.cr = cr
         self.cd = cd
         self.atk_pct = atk_pct
@@ -45,29 +46,31 @@ class DPState:
         self.rune_ids = rune_ids
     
     def __hash__(self):
-        return hash((self.count_rage_fatal, self.count_blade, self.has_intangible, 
-                    self.rune_ids))
+        return hash((self.count_rage, self.count_fatal, self.count_blade, 
+                    self.count_intangible, self.rune_ids))
     
     def __eq__(self, other):
         if not isinstance(other, DPState):
             return False
-        return (self.count_rage_fatal == other.count_rage_fatal and
+        return (self.count_rage == other.count_rage and
+                self.count_fatal == other.count_fatal and
                 self.count_blade == other.count_blade and
-                self.has_intangible == other.has_intangible and
+                self.count_intangible == other.count_intangible and
                 self.rune_ids == other.rune_ids)
     
     def add_rune(self, rune: Rune) -> 'DPState':
         """룬 추가하여 새 상태 생성"""
-        new_count_rage_fatal = self.count_rage_fatal
+        new_count_rage = self.count_rage
+        new_count_fatal = self.count_fatal
         new_count_blade = self.count_blade
-        new_has_intangible = self.has_intangible
+        new_count_intangible = self.count_intangible
         
         if rune.intangible:
-            new_has_intangible = True
+            new_count_intangible += 1
         elif rune.set_id == 5:  # Rage
-            new_count_rage_fatal += 1
+            new_count_rage += 1
         elif rune.set_id == 8:  # Fatal
-            new_count_rage_fatal += 1
+            new_count_fatal += 1
         elif rune.set_id == 4:  # Blade
             new_count_blade += 1
         
@@ -119,9 +122,10 @@ class DPState:
         new_rune_ids = self.rune_ids + (rune.rune_id,)
         
         return DPState(
-            count_rage_fatal=new_count_rage_fatal,
+            count_rage=new_count_rage,
+            count_fatal=new_count_fatal,
             count_blade=new_count_blade,
-            has_intangible=new_has_intangible,
+            count_intangible=new_count_intangible,
             cr=new_cr,
             cd=new_cd,
             atk_pct=new_atk_pct,
@@ -129,6 +133,52 @@ class DPState:
             spd=new_spd,
             rune_ids=new_rune_ids
         )
+
+
+def calculate_max_remaining_sets(slot_runes: Dict[int, List[Rune]], start_slot: int) -> Dict[str, int]:
+    """남은 슬롯에서 얻을 수 있는 최대 세트 개수 계산 (pruning용)"""
+    max_sets = {
+        "RAGE": 0,
+        "FATAL": 0,
+        "BLADE": 0,
+        "INTANGIBLE": 0,
+    }
+    
+    for slot in range(start_slot, 7):
+        if slot not in slot_runes:
+            continue
+        
+        slot_max = {
+            "RAGE": 0,
+            "FATAL": 0,
+            "BLADE": 0,
+            "INTANGIBLE": 0,
+        }
+        
+        for rune in slot_runes[slot]:
+            if rune.intangible:
+                slot_max["INTANGIBLE"] = max(slot_max["INTANGIBLE"], 1)
+            elif rune.set_id == 5:  # Rage
+                slot_max["RAGE"] = max(slot_max["RAGE"], 1)
+            elif rune.set_id == 8:  # Fatal
+                slot_max["FATAL"] = max(slot_max["FATAL"], 1)
+            elif rune.set_id == 4:  # Blade
+                slot_max["BLADE"] = max(slot_max["BLADE"], 1)
+        
+        # 각 슬롯의 최대값을 합산 (슬롯당 최대 1개씩)
+        for key in max_sets:
+            max_sets[key] += slot_max[key]
+    
+    return max_sets
+
+
+def calculate_heuristic_score(state: DPState, base_atk: int = 900) -> float:
+    """휴리스틱 스코어 계산 (상위 K개 유지용)"""
+    # 간단한 휴리스틱: ATK%와 CD에 가중치 부여
+    # 실제 스코어 공식과 유사하게: (cd * 10) + atk_bonus + 200
+    atk_bonus_heuristic = state.atk_pct * (base_atk / 100.0) + state.atk_flat
+    score_heuristic = (state.cd * 10) + atk_bonus_heuristic + 200
+    return score_heuristic
 
 
 def calculate_max_remaining_stats(slot_runes: Dict[int, List[Rune]], start_slot: int) -> Dict[str, float]:
@@ -199,10 +249,48 @@ def calculate_max_remaining_stats(slot_runes: Dict[int, List[Rune]], start_slot:
     return max_stats
 
 
+def check_set_requirements(state: DPState, slot_runes: Dict[int, List[Rune]], 
+                          current_slot: int, target: str) -> bool:
+    """세트 요구사항을 만족할 수 있는지 확인 (pruning)"""
+    remaining_slots = 6 - current_slot
+    
+    # 남은 슬롯에서 얻을 수 있는 최대 세트 개수
+    max_remaining_sets = calculate_max_remaining_sets(slot_runes, current_slot + 1)
+    
+    if target == "A":
+        # A: Rage >= 4 AND Blade >= 2
+        # Rage 조건: 현재 Rage + 무형(Blade에 안 붙일 경우) + 남은 최대 Rage/무형
+        max_rage_with_intangible = state.count_rage + state.count_intangible + max_remaining_sets["RAGE"] + max_remaining_sets["INTANGIBLE"]
+        if max_rage_with_intangible < 4:
+            return False
+        
+        # Blade 조건: 현재 Blade + 무형(Blade에 붙일 경우) + 남은 최대 Blade
+        max_blade_with_intangible = state.count_blade + state.count_intangible + max_remaining_sets["BLADE"] + max_remaining_sets["INTANGIBLE"]
+        if max_blade_with_intangible < 2:
+            return False
+    else:  # target == "B"
+        # B: Fatal >= 4 AND Blade >= 2
+        # Fatal 조건: 현재 Fatal + 무형(Fatal에 붙일 경우) + 남은 최대 Fatal/무형
+        max_fatal_with_intangible = state.count_fatal + state.count_intangible + max_remaining_sets["FATAL"] + max_remaining_sets["INTANGIBLE"]
+        if max_fatal_with_intangible < 4:
+            return False
+        
+        # Blade 조건: 현재 Blade + 무형(Blade에 붙일 경우) + 남은 최대 Blade
+        max_blade_with_intangible = state.count_blade + state.count_intangible + max_remaining_sets["BLADE"] + max_remaining_sets["INTANGIBLE"]
+        if max_blade_with_intangible < 2:
+            return False
+    
+    return True
+
+
 def check_constraints(state: DPState, constraints: Dict[str, float], 
                      slot_runes: Dict[int, List[Rune]], current_slot: int,
                      base_atk: int, base_spd: int, target: str = "B") -> bool:
     """제약 조건을 만족할 수 있는지 확인 (pruning)"""
+    # 세트 요구사항 체크
+    if not check_set_requirements(state, slot_runes, current_slot, target):
+        return False
+    
     if not constraints:
         return True
     
@@ -214,25 +302,25 @@ def check_constraints(state: DPState, constraints: Dict[str, float],
     # 남은 슬롯에서 얻을 수 있는 최대 스탯
     max_remaining = calculate_max_remaining_stats(slot_runes, current_slot + 1)
     
-    # 남은 슬롯에서 얻을 수 있는 최대 세트 개수 (간단한 추정)
+    # 남은 슬롯에서 얻을 수 있는 최대 세트 개수
+    max_remaining_sets = calculate_max_remaining_sets(slot_runes, current_slot + 1)
     remaining_slots = 6 - current_slot
-    # 최선의 경우: 남은 슬롯 모두 같은 세트
-    max_remaining_rage_fatal = min(remaining_slots, 4 - state.count_rage_fatal)
-    max_remaining_blade = min(remaining_slots, 2 - state.count_blade)
     
     # 세트 보너스 고려 (최선의 경우 가정)
     # Blade 2세트 보너스 CR +12
-    potential_blade_count = state.count_blade + max_remaining_blade
+    potential_blade_count = state.count_blade + max_remaining_sets["BLADE"] + (state.count_intangible if state.count_intangible > 0 else 0)
     if potential_blade_count >= 2:
         current_cr += 12
     
     # Rage/Fatal 4세트 보너스 (최선의 경우)
-    potential_rage_fatal_count = state.count_rage_fatal + max_remaining_rage_fatal
-    if potential_rage_fatal_count >= 4:
-        if target == "A":
+    if target == "A":
+        potential_rage_count = state.count_rage + max_remaining_sets["RAGE"] + (state.count_intangible if state.count_intangible > 0 else 0)
+        if potential_rage_count >= 4:
             # Rage 4세트: CD +40
             current_cd += 40
-        else:
+    else:
+        potential_fatal_count = state.count_fatal + max_remaining_sets["FATAL"] + (state.count_intangible if state.count_intangible > 0 else 0)
+        if potential_fatal_count >= 4:
             # Fatal 4세트: ATK% +35
             max_remaining["ATK_PCT"] += 35
     
@@ -268,7 +356,8 @@ def check_constraints(state: DPState, constraints: Dict[str, float],
 
 def optimize_lushen(runes: List[Rune], target: str = "B", 
                     gem_mode: str = "none", grind_mode: str = "none",
-                    top_n: int = 10, base_atk: int = 900) -> List[Dict]:
+                    top_n: int = 10, base_atk: int = 900,
+                    max_candidates_per_slot: int = 300) -> List[Dict]:
     """
     루쉔 최적화
     target: "A" (격노+칼날) 또는 "B" (맹공+칼날)
@@ -293,26 +382,48 @@ def optimize_lushen(runes: List[Rune], target: str = "B",
     # 슬롯별로 DP 진행
     for slot in range(1, 7):
         current_dp = {}
+        candidate_states = []
         
         for prev_state in dp[slot - 1].values():
+            # 세트 요구사항 pruning
+            if not check_set_requirements(prev_state, slot_runes, slot - 1, target):
+                continue
+            
             for rune in slot_runes[slot]:
                 new_state = prev_state.add_rune(rune)
                 
-                # 상태 키 생성 (세트 개수와 무형 여부만으로)
-                state_key = (new_state.count_rage_fatal, new_state.count_blade, 
-                           new_state.has_intangible, new_state.rune_ids)
+                # 세트 요구사항 pruning
+                if not check_set_requirements(new_state, slot_runes, slot, target):
+                    continue
+                
+                # 상태 키 생성 (세트 개수만으로)
+                state_key = (new_state.count_rage, new_state.count_fatal, 
+                           new_state.count_blade, new_state.count_intangible)
                 
                 # 동일 상태에서 더 나은 스탯만 유지
                 if state_key not in current_dp:
                     current_dp[state_key] = new_state
+                    candidate_states.append(new_state)
                 else:
                     existing = current_dp[state_key]
-                    # 잠재적 스코어 비교 (간단한 휴리스틱)
-                    existing_potential = existing.atk_pct * (1.0 + existing.cd / 100.0)
-                    new_potential = new_state.atk_pct * (1.0 + new_state.cd / 100.0)
+                    # 휴리스틱 스코어 비교
+                    existing_score = calculate_heuristic_score(existing, base_atk)
+                    new_score = calculate_heuristic_score(new_state, base_atk)
                     
-                    if new_potential > existing_potential:
+                    if new_score > existing_score:
                         current_dp[state_key] = new_state
+                        # candidate_states에서 기존 것 제거하고 새 것 추가
+                        if existing in candidate_states:
+                            candidate_states.remove(existing)
+                        candidate_states.append(new_state)
+        
+        # 상위 K개만 유지 (후보 폭주 방지)
+        if len(candidate_states) > max_candidates_per_slot:
+            candidate_states.sort(key=lambda s: calculate_heuristic_score(s, base_atk), reverse=True)
+            candidate_states = candidate_states[:max_candidates_per_slot]
+            # current_dp도 상위 K개만 유지
+            current_dp = {s: current_dp.get((s.count_rage, s.count_fatal, s.count_blade, s.count_intangible), s) 
+                         for s in candidate_states}
         
         dp[slot] = current_dp
     
@@ -388,7 +499,8 @@ def search_builds(runes: List[Rune], target: str = "B",
                   objective: str = "SCORE",
                   top_n: int = 20,
                   return_policy: str = "top_n",
-                  max_results: int = 2000) -> List[Dict]:
+                  max_results: int = 2000,
+                  max_candidates_per_slot: int = 300) -> List[Dict]:
     """
     조건 기반 최적 조합 탐색
     
@@ -423,6 +535,10 @@ def search_builds(runes: List[Rune], target: str = "B",
     def dfs(current_slot: int, state: DPState):
         """DFS로 조합 탐색"""
         if len(results) >= max_results:
+            return
+        
+        # Pruning: 세트 요구사항 체크
+        if not check_set_requirements(state, slot_runes, current_slot, target):
             return
         
         # Pruning: 제약 조건을 만족할 수 없으면 가지치기
