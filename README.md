@@ -41,9 +41,60 @@ sw-mcp/
 
 ## 설치
 
+### 개발 환경
+
 ```bash
 cd sw-mcp
+pip install -r requirements.txt
 pip install -e .
+```
+
+### Docker Compose (프로덕션)
+
+```bash
+docker-compose up -d
+```
+
+API: http://localhost:8000
+UI: `streamlit run ui/app.py` (별도 실행)
+
+## 실행 방법
+
+### 1. API 서버
+
+```bash
+# SQLite (개발)
+uvicorn src.sw_api.main:app --reload
+
+# 또는 Docker
+docker-compose up api
+```
+
+### 2. Worker
+
+```bash
+# 직접 실행
+python -m src.sw_worker.cli
+
+# 또는 Docker
+docker-compose up worker
+```
+
+### 3. UI
+
+```bash
+cd ui
+streamlit run app.py
+```
+
+### 4. 데이터베이스 마이그레이션
+
+```bash
+# SQLite
+alembic upgrade head
+
+# 또는 Docker (자동 실행)
+docker-compose up api
 ```
 
 ## 사용법
@@ -189,22 +240,26 @@ python -m pytest tests/test_exhaustive.py -v
 - [x] Exhaustive mode 검증
 - [x] Unit tests 추가
 
-### M2: DB + Import Pipeline (진행 예정)
-- [ ] DB 모델 생성
-- [ ] Import endpoint
-- [ ] Search job endpoint
-- [ ] Results endpoint
+### M2: DB + Import Pipeline ✅
+- [x] DB 모델 생성 (Import, SearchJob, BuildResult)
+- [x] Import endpoint (POST /imports)
+- [x] Search job endpoint (POST /search-jobs)
+- [x] Status endpoint (GET /search-jobs/{id})
+- [x] Results endpoint (GET /search-jobs/{id}/results)
+- [x] Alembic migration setup
 
-### M3: Worker (진행 예정)
-- [ ] Background job runner
-- [ ] Progress tracking
-- [ ] Cancellation support
+### M3: Worker ✅
+- [x] Background job runner (RQ + Redis)
+- [x] Progress tracking
+- [x] Cancellation support
+- [x] Results storage
 
-### M4: UI (진행 예정)
-- [ ] Streamlit UI
-- [ ] JSON upload
-- [ ] Search configuration
-- [ ] Results visualization
+### M4: UI ✅
+- [x] Streamlit UI
+- [x] JSON upload screen
+- [x] Search configuration screen
+- [x] Results visualization
+- [x] Export (JSON/CSV)
 
 ## 라이선스
 
