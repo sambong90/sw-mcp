@@ -1,10 +1,10 @@
 """범용 룬 빌드 최적화 엔진"""
 
-from typing import List, Dict, Tuple, Optional, Set
+from typing import List, Dict, Tuple
 from collections import defaultdict
 from .types import Rune, STAT_ID_NAME, BASE_CR, BASE_CD, SET_ID_NAME
-from .scoring import calculate_stats, score_build, get_objective_value
-from .rules import validate_rune, validate_build, filter_valid_runes, slot_main_is_allowed
+from .scoring import score_build, get_objective_value
+from .rules import validate_rune, validate_build
 
 
 def filter_rune_by_slot(runes: List[Rune], slot: int) -> List[Rune]:
@@ -48,6 +48,15 @@ class DPState:
         self.acc = acc
         self.set_counts = set_counts if set_counts is not None else {}
         self.rune_ids = rune_ids
+    
+    def __hash__(self):
+        return hash((tuple(sorted(self.set_counts.items())), self.rune_ids))
+    
+    def __eq__(self, other):
+        if not isinstance(other, DPState):
+            return False
+        return (self.set_counts == other.set_counts and
+                self.rune_ids == other.rune_ids)
     
     def add_rune(self, rune: Rune) -> 'DPState':
         """룬 추가하여 새 상태 생성"""
@@ -158,19 +167,73 @@ class DPState:
         )
 
 
+def calculate_max_remaining_sets(slot_runes: Dict[int, List[Rune]], start_slot: int) -> Dict[int, int]:
+    """남은 슬롯에서 얻을 수 있는 최대 세트 개수 계산 (pruning용)"""
+    max_sets = defaultdict(int)
+    
+    for slot in range(start_slot, 7):
+        if slot not in slot_runes:
+            continue
+        
+        slot_max = defaultdict(int)
+        
+        for rune in slot_runes[slot]:
+            if rune.intangible:
+                # 무형은 모든 세트에 배치 가능하므로 최대값으로 계산
+                slot_max[25] = max(slot_max.get(25, 0), 1)
+            else:
+                set_id = rune.set_id
+                slot_max[set_id] = max(slot_max.get(set_id, 0), 1)
+        
+        # 각 슬롯의 최대값을 합산 (슬롯당 최대 1개씩)
+        for set_id, count in slot_max.items():
+            max_sets[set_id] += count
+    
+    return dict(max_sets)
+
+
+def calculate_heuristic_score(state: DPState, base_atk: int = 900) -> float:
+    """휴리스틱 스코어 계산 (상위 K개 유지용, fast 모드에서만 사용)"""
+    # 간단한 휴리스틱: ATK%와 CD에 가중치 부여
+    # 실제 스코어 공식과 유사하게: (cd * 10) + atk_bonus + 200
+    atk_bonus_heuristic = state.atk_pct * (base_atk / 100.0) + state.atk_flat
+    score_heuristic = (state.cd * 10) + atk_bonus_heuristic + 200
+    return score_heuristic
+
+
 def calculate_max_remaining_stats(slot_runes: Dict[int, List[Rune]], start_slot: int) -> Dict[str, float]:
     """남은 슬롯에서 얻을 수 있는 최대 스탯 계산 (pruning용)"""
     max_stats = {
-        "CR": 0.0, "CD": 0.0, "ATK_PCT": 0.0, "ATK_FLAT": 0.0,
-        "HP_PCT": 0.0, "HP_FLAT": 0.0, "DEF_PCT": 0.0, "DEF_FLAT": 0.0,
-        "SPD": 0.0, "RES": 0.0, "ACC": 0.0,
+        "CR": 0.0,
+        "CD": 0.0,
+        "ATK_PCT": 0.0,
+        "ATK_FLAT": 0.0,
+        "HP_PCT": 0.0,
+        "HP_FLAT": 0.0,
+        "DEF_PCT": 0.0,
+        "DEF_FLAT": 0.0,
+        "SPD": 0.0,
+        "RES": 0.0,
+        "ACC": 0.0,
     }
     
     for slot in range(start_slot, 7):
         if slot not in slot_runes:
             continue
         
-        slot_max = {key: 0.0 for key in max_stats}
+        slot_max = {
+            "CR": 0.0,
+            "CD": 0.0,
+            "ATK_PCT": 0.0,
+            "ATK_FLAT": 0.0,
+            "HP_PCT": 0.0,
+            "HP_FLAT": 0.0,
+            "DEF_PCT": 0.0,
+            "DEF_FLAT": 0.0,
+            "SPD": 0.0,
+            "RES": 0.0,
+            "ACC": 0.0,
+        }
         
         for rune in slot_runes[slot]:
             # 메인 스탯
@@ -254,72 +317,52 @@ def calculate_max_remaining_stats(slot_runes: Dict[int, List[Rune]], start_slot:
     return max_stats
 
 
-def calculate_max_remaining_sets(slot_runes: Dict[int, List[Rune]], start_slot: int) -> Dict[int, int]:
-    """남은 슬롯에서 얻을 수 있는 최대 세트 개수 계산 (pruning용)"""
-    max_sets = {}
-    
-    for slot in range(start_slot, 7):
-        if slot not in slot_runes:
-            continue
-        
-        slot_max = {}
-        for rune in slot_runes[slot]:
-            if rune.intangible:
-                # 무형은 모든 세트에 배치 가능하므로 최대값으로 계산
-                slot_max[25] = max(slot_max.get(25, 0), 1)
-            else:
-                set_id = rune.set_id
-                slot_max[set_id] = max(slot_max.get(set_id, 0), 0), 1)
-        
-        # 각 슬롯의 최대값을 합산
-        for set_id, count in slot_max.items():
-            max_sets[set_id] = max_sets.get(set_id, 0) + count
-    
-    return max_sets
-
-
-def check_set_constraints(state: DPState, set_constraints: Dict[str, int],
+def check_set_constraints(state: DPState, set_constraints: Dict[str, int], 
                           slot_runes: Dict[int, List[Rune]], current_slot: int) -> bool:
     """세트 제약조건을 만족할 수 있는지 확인 (pruning)"""
     if not set_constraints:
-        return True
+        return True  # 세트 조건 없음
     
     # 남은 슬롯에서 얻을 수 있는 최대 세트 개수
     max_remaining_sets = calculate_max_remaining_sets(slot_runes, current_slot + 1)
     
-    # 현재 세트 개수 + 무형 룬 개수
-    current_set_counts = state.set_counts.copy()
-    intangible_count = sum(1 for rid in state.rune_ids 
-                          if any(r.rune_id == rid and r.intangible for r in 
-                                [r for slot_list in slot_runes.values() for r in slot_list]))
+    # 세트 이름 -> ID 매핑
+    name_to_id = {name: sid for sid, name in SET_ID_NAME.items()}
     
     # 각 세트 제약조건 확인
     for set_name, required_count in set_constraints.items():
-        # 세트 이름을 ID로 변환
-        set_id = None
-        for sid, name in SET_ID_NAME.items():
-            if name == set_name:
-                set_id = sid
-                break
-        
+        set_id = name_to_id.get(set_name)
         if set_id is None:
-            continue
+            continue  # 알 수 없는 세트 이름은 무시
         
-        # 현재 개수 + 무형(최선의 경우) + 남은 최대값
-        current_count = current_set_counts.get(set_id, 0)
+        # 현재 세트 개수
+        current_count = state.set_counts.get(set_id, 0)
+        
+        # 무형 룬 개수 (모든 세트에 배치 가능)
+        intangible_count = state.set_counts.get(25, 0)
+        
+        # 남은 슬롯에서 얻을 수 있는 최대 개수
         max_remaining = max_remaining_sets.get(set_id, 0)
-        max_with_intangible = current_count + (intangible_count if intangible_count > 0 else 0) + max_remaining
+        max_intangible = max_remaining_sets.get(25, 0)
         
-        if max_with_intangible < required_count:
+        # 최대 가능한 세트 개수 (무형은 모든 세트에 배치 가능하므로 최대값으로 계산)
+        max_possible = current_count + max(intangible_count, max_intangible) + max_remaining
+        
+        if max_possible < required_count:
             return False
     
     return True
 
 
-def check_constraints(state: DPState, constraints: Dict[str, float],
+def check_constraints(state: DPState, constraints: Dict[str, float], 
                      slot_runes: Dict[int, List[Rune]], current_slot: int,
-                     base_atk: int, base_spd: int, base_hp: int, base_def: int) -> bool:
+                     base_atk: int, base_spd: int, base_hp: int, base_def: int,
+                     set_constraints: Dict[str, int] = None) -> bool:
     """제약 조건을 만족할 수 있는지 확인 (pruning)"""
+    # 세트 제약조건 체크
+    if not check_set_constraints(state, set_constraints or {}, slot_runes, current_slot):
+        return False
+    
     if not constraints:
         return True
     
@@ -342,33 +385,36 @@ def check_constraints(state: DPState, constraints: Dict[str, float],
     final_atk_bonus = round(base_atk * (final_atk_pct / 100.0) + final_atk_flat)
     final_atk_total = base_atk + final_atk_bonus
     
-    # HP_TOTAL 계산
+    # HP_TOTAL과 DEF_TOTAL 계산
     final_hp_pct = state.hp_pct + max_remaining["HP_PCT"]
     final_hp_flat = state.hp_flat + max_remaining["HP_FLAT"]
-    final_hp_total = base_hp + round(base_hp * (final_hp_pct / 100.0) + final_hp_flat)
+    final_hp_bonus = round(base_hp * (final_hp_pct / 100.0) + final_hp_flat)
+    final_hp_total = base_hp + final_hp_bonus
     
-    # DEF_TOTAL 계산
     final_def_pct = state.def_pct + max_remaining["DEF_PCT"]
     final_def_flat = state.def_flat + max_remaining["DEF_FLAT"]
-    final_def_total = base_def + round(base_def * (final_def_pct / 100.0) + final_def_flat)
+    final_def_bonus = round(base_def * (final_def_pct / 100.0) + final_def_flat)
+    final_def_total = base_def + final_def_bonus
     
     # 제약 조건 체크
-    for key, min_val in constraints.items():
-        key_upper = key.upper()
-        if key_upper == "CR" and final_cr < min_val:
-            return False
-        elif key_upper == "CD" and final_cd < min_val:
-            return False
-        elif key_upper == "SPD" and final_spd < min_val:
-            return False
-        elif key_upper == "ATK_BONUS" and final_atk_bonus < min_val:
-            return False
-        elif key_upper == "ATK_TOTAL" and final_atk_total < min_val:
-            return False
-        elif key_upper == "HP_TOTAL" and final_hp_total < min_val:
-            return False
-        elif key_upper == "DEF_TOTAL" and final_def_total < min_val:
-            return False
+    if "CR" in constraints and final_cr < constraints["CR"]:
+        return False
+    if "CD" in constraints and final_cd < constraints["CD"]:
+        return False
+    if "SPD" in constraints and final_spd < constraints["SPD"]:
+        return False
+    if "ATK_BONUS" in constraints and final_atk_bonus < constraints["ATK_BONUS"]:
+        return False
+    if "ATK_TOTAL" in constraints and final_atk_total < constraints["ATK_TOTAL"]:
+        return False
+    if "ATK_PCT" in constraints and final_atk_pct < constraints["ATK_PCT"]:
+        return False
+    if "ATK_FLAT" in constraints and final_atk_flat < constraints["ATK_FLAT"]:
+        return False
+    if "HP_TOTAL" in constraints and final_hp_total < constraints["HP_TOTAL"]:
+        return False
+    if "DEF_TOTAL" in constraints and final_def_total < constraints["DEF_TOTAL"]:
+        return False
     
     return True
 
@@ -388,21 +434,21 @@ def search_builds(runes: List[Rune],
                   max_candidates_per_slot: int = 300,
                   mode: str = "exhaustive") -> List[Dict]:
     """
-    범용 룬 빌드 탐색 엔진 (SWOP 스타일)
+    조건 기반 최적 조합 탐색 (SWOP 스타일, 범용 엔진)
     
     ⚠️ 중요: exhaustive 모드에서는 정확도 100% 보장 (heuristic pruning 없음)
     - exhaustive 모드: feasibility pruning과 upper-bound pruning만 사용
     - fast 모드: 정확도 보장 없음 (heuristic pruning 사용)
     
     Args:
-        runes: 룬 리스트 (모든 세트 포함)
+        runes: 룬 리스트
         base_atk: 기본 공격력
         base_spd: 기본 속도
         base_hp: 기본 체력
         base_def: 기본 방어력
-        constraints: 최소 조건 딕셔너리 ({"SPD": 100, "CR": 100, "ATK_TOTAL": 2000} 등)
-        set_constraints: 세트 제약조건 ({"Rage": 4, "Blade": 2} 등, None이면 모든 세트 허용)
-        objective: 목표 함수 ("SCORE", "ATK_TOTAL", "EHP", "SPD", "DAMAGE_PROXY" 등)
+        constraints: 최소 조건 딕셔너리 (예: {"SPD": 100, "CR": 100, "ATK_TOTAL": 2000, "MIN_SCORE": 4800})
+        set_constraints: 세트 제약조건 (예: {"Rage": 4, "Blade": 2}). None이면 모든 세트 허용
+        objective: 정렬 기준 ("SCORE", "ATK_TOTAL", "ATK_BONUS", "CD", "SPD", "EHP" 등)
         top_n: 상위 N개 반환 (return_all=False일 때만 적용)
         return_policy: "top_n" 또는 "all_at_best"
         return_all: True면 조건 만족하는 모든 빌드 반환 (메모리 주의)
@@ -418,7 +464,7 @@ def search_builds(runes: List[Rune],
     if set_constraints is None:
         set_constraints = {}
     
-    # 슬롯별 룬 분리 (게임 룰 기반)
+    # 슬롯별 룬 분리
     slot_runes = {}
     for slot in range(1, 7):
         slot_runes[slot] = filter_rune_by_slot(runes, slot)
@@ -430,29 +476,8 @@ def search_builds(runes: List[Rune],
         # 슬롯별 후보 수가 많으면 상위 K개만 유지 (heuristic pruning)
         for slot in range(1, 7):
             if len(slot_runes[slot]) > max_candidates_per_slot:
-                # 간단한 휴리스틱: ATK%, CD, CR, SPD 가중합
-                def heuristic(rune):
-                    score = 0.0
-                    if rune.main_stat_id == 4:  # ATK%
-                        score += rune.main_stat_value * 10
-                    elif rune.main_stat_id == 10:  # CD
-                        score += rune.main_stat_value * 5
-                    elif rune.main_stat_id == 9:  # CR
-                        score += rune.main_stat_value * 3
-                    elif rune.main_stat_id == 8:  # SPD
-                        score += rune.main_stat_value * 2
-                    for sub in rune.subs:
-                        if sub.stat_id == 4:
-                            score += sub.value * 10
-                        elif sub.stat_id == 10:
-                            score += sub.value * 5
-                        elif sub.stat_id == 9:
-                            score += sub.value * 3
-                        elif sub.stat_id == 8:
-                            score += sub.value * 2
-                    return score
-                
-                slot_runes[slot].sort(key=heuristic, reverse=True)
+                # 휴리스틱 스코어로 정렬하여 상위 K개만 유지
+                slot_runes[slot].sort(key=lambda r: calculate_heuristic_score(DPState().add_rune(r), base_atk), reverse=True)
                 slot_runes[slot] = slot_runes[slot][:max_candidates_per_slot]
     
     # 슬롯 탐색 순서 최적화: 후보 수가 적은 슬롯부터 (정확도 영향 없음)
@@ -463,25 +488,27 @@ def search_builds(runes: List[Rune],
     rune_dict = {r.rune_id: r for r in runes}
     
     def calculate_upper_bound(state: DPState, current_slot: int) -> float:
-        """남은 슬롯에서 얻을 수 있는 최대 objective 상한 계산"""
+        """남은 슬롯에서 얻을 수 있는 최대 점수 상한 계산 (upper-bound pruning용)"""
         if current_slot > 6:
             return 0.0
         
         max_remaining = calculate_max_remaining_stats(slot_runes, current_slot + 1)
         
-        # 현재까지의 스탯으로 최대 예상 스탯 계산
-        # (세트 보너스는 복잡하므로 간단히 추정)
-        max_cd = BASE_CD + state.cd + max_remaining["CD"] + 40  # Rage 4세트 가정
-        max_atk_pct = state.atk_pct + max_remaining["ATK_PCT"] + 35  # Fatal 4세트 가정
-        max_atk_flat = state.atk_flat + max_remaining["ATK_FLAT"]
-        max_atk_bonus = round(base_atk * (max_atk_pct / 100.0) + max_atk_flat)
+        # 현재까지의 스탯
+        current_cd = BASE_CD + state.cd
+        current_atk_pct = state.atk_pct
+        current_atk_flat = state.atk_flat
         
-        # SCORE 기준으로만 upper bound 계산 (다른 objective는 복잡)
-        if objective == "SCORE":
-            return (max_cd * 10) + max_atk_bonus + 200
-        else:
-            # 다른 objective는 보수적으로 큰 값 반환 (pruning 안 함)
-            return float('inf')
+        # 최대 예상 스탯
+        max_cd = current_cd + max_remaining["CD"]
+        max_atk_pct = current_atk_pct + max_remaining["ATK_PCT"]
+        max_atk_flat = current_atk_flat + max_remaining["ATK_FLAT"]
+        
+        # 최대 예상 점수 (SCORE objective 기준)
+        max_atk_bonus = round(base_atk * (max_atk_pct / 100.0) + max_atk_flat)
+        max_score = (max_cd * 10) + max_atk_bonus + 200
+        
+        return max_score
     
     def dfs(current_slot_idx: int, state: DPState):
         """DFS로 조합 탐색"""
@@ -494,24 +521,19 @@ def search_builds(runes: List[Rune],
         # Upper-bound pruning (top_n 모드일 때만, exhaustive 모드에서도 사용)
         if not return_all and top_n > 0 and len(results) >= top_n:
             upper_bound = calculate_upper_bound(state, current_slot)
+            # 현재 결과의 최저 점수보다 상한이 낮으면 가지치기
             if len(results) >= top_n:
                 # 결과를 objective 기준으로 정렬하여 최저값 확인
-                sorted_results = sorted(results, 
-                                       key=lambda x: get_objective_value(objective, x["stats"]), 
-                                       reverse=True)
+                sorted_results = sorted(results, key=lambda x: get_objective_value(objective, x["stats"]), reverse=True)
                 min_value = get_objective_value(objective, sorted_results[top_n - 1]["stats"])
                 
                 # upper_bound는 SCORE 기준이므로 objective가 SCORE일 때만 비교
                 if objective == "SCORE" and upper_bound < min_value:
                     return
         
-        # Feasibility pruning: 세트 제약조건 체크
-        if not check_set_constraints(state, set_constraints, slot_runes, current_slot - 1):
-            return
-        
-        # Feasibility pruning: 제약 조건을 만족할 수 없으면 가지치기
+        # Feasibility pruning: 제약 조건을 만족할 수 없으면 가지치기 (exhaustive 모드에서도 사용)
         if not check_constraints(state, constraints, slot_runes, current_slot - 1, 
-                                base_atk, base_spd, base_hp, base_def):
+                                 base_atk, base_spd, base_hp, base_def, set_constraints):
             return
         
         if current_slot > 6:
@@ -524,7 +546,7 @@ def search_builds(runes: List[Rune],
             if not validate_build(rune_combo):
                 return
             
-            # 스코어 계산 (무형 배치 최적화 포함)
+            # 스코어 계산 (score_build가 무형 배치 최적화 포함)
             score, stats, intangible_assignment = score_build(
                 rune_combo,
                 objective=objective,
@@ -539,11 +561,29 @@ def search_builds(runes: List[Rune],
             if score <= 0:
                 return
             
-            # MIN_SCORE 제약조건 확인
+            # 제약 조건 최종 확인
+            if "CR" in constraints and stats.get("cr_total", 0) < constraints["CR"]:
+                return
+            if "CD" in constraints and stats.get("cd_total", 0) < constraints["CD"]:
+                return
+            if "SPD" in constraints and stats.get("spd_total", 0) < constraints["SPD"]:
+                return
+            if "ATK_BONUS" in constraints and stats.get("atk_bonus", 0) < constraints["ATK_BONUS"]:
+                return
+            if "ATK_TOTAL" in constraints and stats.get("atk_total", 0) < constraints["ATK_TOTAL"]:
+                return
+            if "ATK_PCT" in constraints and stats.get("atk_pct_total", 0) < constraints["ATK_PCT"]:
+                return
+            if "ATK_FLAT" in constraints and stats.get("atk_flat_total", 0) < constraints["ATK_FLAT"]:
+                return
+            if "HP_TOTAL" in constraints and stats.get("hp_total", 0) < constraints["HP_TOTAL"]:
+                return
+            if "DEF_TOTAL" in constraints and stats.get("def_total", 0) < constraints["DEF_TOTAL"]:
+                return
             if "MIN_SCORE" in constraints and score < constraints["MIN_SCORE"]:
                 return
             
-            # 유효한 빌드
+            # score > 0이고 constraints를 만족하면 유효한 빌드
             results.append({
                 "runes": rune_combo,
                 "score": score,
@@ -561,16 +601,16 @@ def search_builds(runes: List[Rune],
     initial_state = DPState()
     dfs(0, initial_state)
     
-    # 정렬
+    # 정렬 (get_objective_value 사용)
     results.sort(key=lambda x: get_objective_value(objective, x["stats"]), reverse=True)
     
     # 반환 정책 적용
     if return_all:
-        pass  # 모든 결과 반환
+        # return_all=True면 모든 결과 반환 (top_n 무시)
+        pass
     elif return_policy == "all_at_best" and results:
         best_value = get_objective_value(objective, results[0]["stats"])
-        filtered = [r for r in results 
-                   if get_objective_value(objective, r["stats"]) == best_value]
+        filtered = [r for r in results if get_objective_value(objective, r["stats"]) == best_value]
         results = filtered[:top_n] if top_n > 0 else filtered
     else:
         results = results[:top_n] if top_n > 0 else results
@@ -580,6 +620,7 @@ def search_builds(runes: List[Rune],
     for result in results:
         rune_combo = result["runes"]
         stats = result["stats"]
+        intangible_assignment = result["intangible_assignment"]
         
         # 슬롯별 룬 정보
         slot_info = {}
@@ -597,6 +638,14 @@ def search_builds(runes: List[Rune],
                         for sub in rune.subs]
             }
         
+        # 무형 배치 포맷팅 (Dict[int, str] -> str)
+        intangible_str = "none"
+        if intangible_assignment:
+            for rune_id, assignment in intangible_assignment.items():
+                if assignment != "none":
+                    intangible_str = assignment
+                    break
+        
         formatted_results.append({
             "score": result["score"],
             "cr_total": stats.get("cr_total", 0),
@@ -608,9 +657,8 @@ def search_builds(runes: List[Rune],
             "hp_total": stats.get("hp_total", 0),
             "def_total": stats.get("def_total", 0),
             "spd_total": stats.get("spd_total", 0),
-            "intangible_assignment": result["intangible_assignment"],
+            "intangible_assignment": intangible_str,
             "slots": slot_info,
         })
     
     return formatted_results
-

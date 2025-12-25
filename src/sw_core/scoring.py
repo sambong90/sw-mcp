@@ -1,6 +1,6 @@
 """범용 빌드 스코어링"""
 
-from typing import List, Tuple, Optional, Dict, Any, Callable
+from typing import List, Tuple, Dict, Callable
 from .types import Rune, BASE_CR, BASE_CD, STAT_ID_NAME, SET_ID_NAME
 from .types import RAGE_4SET_CD, FATAL_4SET_ATK_PCT, BLADE_2SET_CR
 
