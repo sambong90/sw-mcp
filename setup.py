@@ -12,6 +12,14 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "pydantic>=2.0.0",
+        "fastapi>=0.104.0",
+        "uvicorn[standard]>=0.24.0",
+        "python-multipart>=0.0.6",
+        "sqlalchemy>=2.0.0",
+        "alembic>=1.12.0",
+        "psycopg2-binary>=2.9.9",
+        "redis>=5.0.0",
+        "rq>=1.15.0",
     ],
     tests_require=["pytest>=7.0.0"],
     extras_require={
