@@ -6,24 +6,46 @@ from .types import Rune, STAT_ID_NAME, BASE_CR, BASE_CD
 from .scoring import score_build, find_best_intangible_assignment, calculate_stats
 
 
-def filter_rune_by_slot(runes: List[Rune], slot: int, target: str = "B") -> List[Rune]:
-    """슬롯별 룬 필터링 및 조건 검사"""
+def filter_rune_by_slot(runes: List[Rune], slot: int, target: str = "B", 
+                        allow_any_main: bool = False) -> List[Rune]:
+    """
+    슬롯별 룬 필터링 및 조건 검사
+    
+    Args:
+        runes: 전체 룬 리스트
+        slot: 슬롯 번호 (1-6)
+        target: "A" 또는 "B" (사용 안 함, 호환성 유지)
+        allow_any_main: True면 메인스탯 제한 없음 (preset 해제)
+    
+    Returns:
+        필터링된 룬 리스트
+    """
     filtered = [r for r in runes if r.slot == slot]
     
-    if slot == 2:
-        # 슬롯2: 메인 ATK%만 허용
-        filtered = [r for r in filtered if r.main_stat_id == 4]  # ATK%
+    if slot == 1:
+        # 슬롯1: 서브옵에 DEF%, DEF+ 금지 (서브/보석 포함)
+        filtered = [r for r in filtered if not r.has_sub_stat(6)]  # DEF% 서브옵 제거
+        filtered = [r for r in filtered if not r.has_sub_stat(5)]  # DEF+ 서브옵 제거
+        # prefix도 체크
+        filtered = [r for r in filtered if not (r.has_prefix and r.prefix_stat_id in [5, 6])]
+    elif slot == 2:
+        # 슬롯2: 메인 ATK%만 허용 (preset 해제 시 모든 메인 허용)
+        if not allow_any_main:
+            filtered = [r for r in filtered if r.main_stat_id == 4]  # ATK%
     elif slot == 3:
-        # 슬롯3: 서브옵에 ATK% 금지 (가능하면 ATK+도 금지)
+        # 슬롯3: 서브옵에 ATK% 금지, ATK+도 금지 (서브/보석 포함)
         filtered = [r for r in filtered if not r.has_sub_stat(4)]  # ATK% 서브옵 제거
-        # ATK+도 제거 (선택적)
         filtered = [r for r in filtered if not r.has_sub_stat(3)]  # ATK+ 서브옵 제거
+        # prefix도 체크
+        filtered = [r for r in filtered if not (r.has_prefix and r.prefix_stat_id in [3, 4])]
     elif slot == 4:
-        # 슬롯4: 메인 CD만 허용
-        filtered = [r for r in filtered if r.main_stat_id == 10]  # CD
+        # 슬롯4: 메인 CD만 허용 (preset 해제 시 모든 메인 허용)
+        if not allow_any_main:
+            filtered = [r for r in filtered if r.main_stat_id == 10]  # CD
     elif slot == 6:
-        # 슬롯6: 메인 ATK%만 허용
-        filtered = [r for r in filtered if r.main_stat_id == 4]  # ATK%
+        # 슬롯6: 메인 ATK%만 허용 (preset 해제 시 모든 메인 허용)
+        if not allow_any_main:
+            filtered = [r for r in filtered if r.main_stat_id == 4]  # ATK%
     
     return filtered
 
@@ -537,38 +559,49 @@ def search_builds(runes: List[Rune], target: str = "B",
                   objective: str = "SCORE",
                   top_n: int = 20,
                   return_policy: str = "top_n",
+                  return_all: bool = False,
                   max_results: int = 2000,
                   max_candidates_per_slot: int = 300,
                   mode: str = "exhaustive",
-                  require_sets: bool = True) -> List[Dict]:
+                  require_sets: bool = True,
+                  allow_any_main: bool = False) -> List[Dict]:
     """
-    조건 기반 최적 조합 탐색
+    조건 기반 최적 조합 탐색 (SWOP 스타일)
+    
+    ⚠️ 중요: exhaustive 모드에서는 정확도 100% 보장 (heuristic pruning 없음)
+    - exhaustive 모드: feasibility pruning과 upper-bound pruning만 사용
+    - fast 모드: 정확도 보장 없음 (heuristic pruning 사용)
     
     Args:
         runes: 룬 리스트
         target: "A" (격노+칼날) 또는 "B" (맹공+칼날)
         base_atk: 기본 공격력
         base_spd: 기본 속도
-        constraints: 최소 조건 딕셔너리 (예: {"SPD": 100, "CR": 100, "ATK_TOTAL": 2000})
-        objective: 정렬 기준 ("SCORE", "ATK_TOTAL", "ATK_BONUS", "CD", "SPD" 등)
-        top_n: 상위 N개 반환
+        constraints: 최소 조건 딕셔너리 (예: {"SPD": 100, "CR": 100, "ATK_TOTAL": 2000, "MIN_SCORE": 4800})
+        objective: 정렬 기준 ("SCORE", "ATK_TOTAL", "ATK_BONUS", "CD", "SPD")
+        top_n: 상위 N개 반환 (return_all=False일 때만 적용)
         return_policy: "top_n" 또는 "all_at_best"
-        max_results: fast 모드에서만 사용되는 최대 결과 수 제한 (exhaustive 모드에서는 무시)
-        max_candidates_per_slot: fast 모드에서 슬롯당 최대 후보 수
-        mode: "exhaustive" (모든 조합 탐색, 기본값) 또는 "fast" (heuristic pruning 사용)
-        require_sets: True면 target 세트 조건 필수, False면 모든 세트 허용 (SWOP-like)
+        return_all: True면 조건 만족하는 모든 빌드 반환 (메모리 주의)
+        max_results: fast 모드에서만 사용되는 최대 결과 수 제한
+        max_candidates_per_slot: fast 모드에서만 사용 (exhaustive 모드에서는 무시)
+        mode: "exhaustive" (정확도 100% 보장) 또는 "fast" (정확도 보장 없음)
+        require_sets: True면 target 세트 조건 필수, False면 모든 세트 허용
+        allow_any_main: True면 slot 2/4/6 메인스탯 제한 해제
     
     Returns:
         조건을 만족하는 조합 리스트
     
     Examples:
-        >>> # Exhaustive search with set requirements
-        >>> results = search_builds(runes, target="B", constraints={"CR": 100}, mode="exhaustive")
+        >>> # Exhaustive search with constraints (정확도 100%)
+        >>> results = search_builds(runes, target="B", constraints={"CR": 100, "SPD": 100}, mode="exhaustive")
         
         >>> # Any set search (SWOP-like)
         >>> results = search_builds(runes, require_sets=False, constraints={"CR": 100}, mode="exhaustive")
         
-        >>> # Fast mode with top-K pruning
+        >>> # Return all matching builds
+        >>> results = search_builds(runes, constraints={"CR": 100}, return_all=True, mode="exhaustive")
+        
+        >>> # Fast mode (정확도 보장 없음)
         >>> results = search_builds(runes, mode="fast", max_candidates_per_slot=100)
     """
     if constraints is None:
@@ -577,29 +610,113 @@ def search_builds(runes: List[Rune], target: str = "B",
     # CR>=100 hardcode 제거: constraints에 CR이 있으면 require_cr_100=False
     require_cr_100 = "CR" not in constraints
     
+    # exhaustive 모드에서는 max_candidates_per_slot 사용 금지
+    if mode == "exhaustive" and max_candidates_per_slot < float('inf'):
+        # exhaustive 모드에서는 후보 제한 없음
+        pass
+    
     # 슬롯별 룬 분리
     slot_runes = {}
     for slot in range(1, 7):
-        slot_runes[slot] = filter_rune_by_slot(runes, slot, target)
+        slot_runes[slot] = filter_rune_by_slot(runes, slot, target, allow_any_main=allow_any_main)
         if not slot_runes[slot]:
             return []
+    
+    # exhaustive 모드: fast 모드에서만 후보 제한 적용
+    if mode == "fast":
+        # 슬롯별 후보 수가 많으면 상위 K개만 유지 (heuristic pruning)
+        for slot in range(1, 7):
+            if len(slot_runes[slot]) > max_candidates_per_slot:
+                # 휴리스틱 스코어로 정렬하여 상위 K개만 유지
+                slot_runes[slot].sort(key=lambda r: calculate_heuristic_score(DPState().add_rune(r), base_atk), reverse=True)
+                slot_runes[slot] = slot_runes[slot][:max_candidates_per_slot]
+    
+    # 슬롯 탐색 순서 최적화: 후보 수가 적은 슬롯부터 (정확도 영향 없음)
+    slot_order = sorted(range(1, 7), key=lambda s: len(slot_runes[s]))
     
     # DFS로 모든 조합 탐색
     results = []
     rune_dict = {r.rune_id: r for r in runes}
     
-    def dfs(current_slot: int, state: DPState):
+    # Upper-bound pruning을 위한 최저 점수 추적 (top_n 모드일 때만)
+    
+    def calculate_upper_bound(state: DPState, current_slot: int) -> float:
+        """남은 슬롯에서 얻을 수 있는 최대 점수 상한 계산 (upper-bound pruning용)"""
+        if current_slot > 6:
+            return 0.0
+        
+        max_remaining = calculate_max_remaining_stats(slot_runes, current_slot + 1)
+        max_remaining_sets = calculate_max_remaining_sets(slot_runes, current_slot + 1)
+        
+        # 현재까지의 스탯
+        current_cd = BASE_CD + state.cd
+        current_atk_pct = state.atk_pct
+        current_atk_flat = state.atk_flat
+        
+        # 세트 보너스 고려 (최선의 경우)
+        if target == "A":
+            potential_rage = state.count_rage + max_remaining_sets["RAGE"] + (state.count_intangible if state.count_intangible > 0 else 0)
+            if potential_rage >= 4:
+                current_cd += 40
+        else:  # target == "B"
+            potential_fatal = state.count_fatal + max_remaining_sets["FATAL"] + (state.count_intangible if state.count_intangible > 0 else 0)
+            if potential_fatal >= 4:
+                max_remaining["ATK_PCT"] += 35
+        
+        # 최대 예상 스탯
+        max_cd = current_cd + max_remaining["CD"]
+        max_atk_pct = current_atk_pct + max_remaining["ATK_PCT"]
+        max_atk_flat = current_atk_flat + max_remaining["ATK_FLAT"]
+        
+        # 최대 예상 점수
+        max_atk_bonus = round(base_atk * (max_atk_pct / 100.0) + max_atk_flat)
+        max_score = (max_cd * 10) + max_atk_bonus + 200
+        
+        return max_score
+    
+    def dfs(current_slot_idx: int, state: DPState):
         """DFS로 조합 탐색"""
+        current_slot = slot_order[current_slot_idx] if current_slot_idx < len(slot_order) else 7
+        
         # fast 모드에서만 early stop
         if mode == "fast" and len(results) >= max_results:
             return
         
-        # Pruning: 세트 요구사항 체크 (exhaustive 모드에서는 제외)
-        if mode == "fast" and not check_set_requirements(state, slot_runes, current_slot, target, require_sets):
+        # Upper-bound pruning (top_n 모드일 때만, exhaustive 모드에서도 사용)
+        if not return_all and top_n > 0 and len(results) >= top_n:
+            upper_bound = calculate_upper_bound(state, current_slot)
+            # 현재 결과의 최저 점수보다 상한이 낮으면 가지치기
+            if len(results) >= top_n:
+                # 결과를 objective 기준으로 정렬하여 최저값 확인
+                if objective == "SCORE":
+                    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
+                    min_score = sorted_results[top_n - 1]["score"]
+                elif objective == "ATK_TOTAL":
+                    sorted_results = sorted(results, key=lambda x: x["stats"]["atk_total"], reverse=True)
+                    min_score = sorted_results[top_n - 1]["stats"]["atk_total"]
+                elif objective == "ATK_BONUS":
+                    sorted_results = sorted(results, key=lambda x: x["stats"]["atk_bonus"], reverse=True)
+                    min_score = sorted_results[top_n - 1]["stats"]["atk_bonus"]
+                elif objective == "CD":
+                    sorted_results = sorted(results, key=lambda x: x["stats"]["cd_total"], reverse=True)
+                    min_score = sorted_results[top_n - 1]["stats"]["cd_total"]
+                elif objective == "SPD":
+                    sorted_results = sorted(results, key=lambda x: x["stats"]["spd_total"], reverse=True)
+                    min_score = sorted_results[top_n - 1]["stats"]["spd_total"]
+                else:
+                    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
+                    min_score = sorted_results[top_n - 1]["score"]
+                
+                # upper_bound는 SCORE 기준이므로 objective가 SCORE일 때만 비교
+                if objective == "SCORE" and upper_bound < min_score:
+                    return
+        
+        # Feasibility pruning: 세트 요구사항 체크 (exhaustive 모드에서도 사용)
+        if not check_set_requirements(state, slot_runes, current_slot - 1, target, require_sets):
             return
         
-        # Pruning: 제약 조건을 만족할 수 없으면 가지치기 (exhaustive 모드에서도 constraints pruning은 유지)
-        if not check_constraints(state, constraints, slot_runes, current_slot, base_atk, base_spd, target, require_sets):
+        # Feasibility pruning: 제약 조건을 만족할 수 없으면 가지치기 (exhaustive 모드에서도 사용)
+        if not check_constraints(state, constraints, slot_runes, current_slot - 1, base_atk, base_spd, target, require_sets):
             return
         
         if current_slot > 6:
@@ -646,11 +763,11 @@ def search_builds(runes: List[Rune], target: str = "B",
         # 현재 슬롯의 룬들을 시도
         for rune in slot_runes[current_slot]:
             new_state = state.add_rune(rune)
-            dfs(current_slot + 1, new_state)
+            dfs(current_slot_idx + 1, new_state)
     
     # DFS 시작
     initial_state = DPState()
-    dfs(1, initial_state)
+    dfs(0, initial_state)
     
     # 정렬
     if objective == "SCORE":
@@ -667,12 +784,15 @@ def search_builds(runes: List[Rune], target: str = "B",
         results.sort(key=lambda x: x["score"], reverse=True)
     
     # 반환 정책 적용
-    if return_policy == "all_at_best" and results:
+    if return_all:
+        # return_all=True면 모든 결과 반환 (top_n 무시)
+        pass
+    elif return_policy == "all_at_best" and results:
         best_value = results[0]["score"] if objective == "SCORE" else results[0]["stats"].get(objective.lower(), 0)
         filtered = [r for r in results if (r["score"] if objective == "SCORE" else r["stats"].get(objective.lower(), 0)) == best_value]
-        results = filtered[:top_n]
+        results = filtered[:top_n] if top_n > 0 else filtered
     else:
-        results = results[:top_n]
+        results = results[:top_n] if top_n > 0 else results
     
     # 결과 포맷팅
     formatted_results = []

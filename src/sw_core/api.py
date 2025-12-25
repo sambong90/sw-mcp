@@ -14,31 +14,36 @@ def run_search(
     objective: str = "SCORE",
     top_n: int = 20,
     return_policy: str = "top_n",
+    return_all: bool = False,
     base_atk: int = 900,
     base_spd: int = 104,
     require_sets: bool = True,
+    allow_any_main: bool = False,
     max_candidates_per_slot: int = 300,
     max_results: int = 2000
 ) -> Dict[str, Any]:
     """
-    Stable API for running rune optimization searches.
+    Stable API for running rune optimization searches (SWOP 스타일).
     
-    This function provides a unified interface for both simple optimization
-    and constraint-based searches.
+    ⚠️ 중요: exhaustive 모드에서는 정확도 100% 보장
+    - exhaustive: feasibility pruning과 upper-bound pruning만 사용 (누락 없음)
+    - fast: 정확도 보장 없음 (heuristic pruning 사용)
     
     Args:
         runes: List of Rune objects to search
         target: "A" (Rage+Blade) or "B" (Fatal+Blade)
-        mode: "exhaustive" (guaranteed complete) or "fast" (heuristic pruning)
-        constraints: Optional dict of minimum constraints (e.g., {"CR": 100, "SPD": 100})
+        mode: "exhaustive" (정확도 100% 보장) or "fast" (정확도 보장 없음)
+        constraints: Optional dict of minimum constraints (e.g., {"CR": 100, "SPD": 100, "ATK_TOTAL": 2000, "MIN_SCORE": 4800})
         objective: Sort objective ("SCORE", "ATK_TOTAL", "ATK_BONUS", "CD", "SPD")
-        top_n: Number of top results to return
+        top_n: Number of top results to return (return_all=False일 때만 적용)
         return_policy: "top_n" or "all_at_best"
+        return_all: If True, return all matching builds (메모리 주의)
         base_atk: Base attack stat
         base_spd: Base speed stat
         require_sets: If True, enforce target set requirements; if False, allow any sets
-        max_candidates_per_slot: For fast mode, max candidates per slot
-        max_results: For fast mode, max results limit
+        allow_any_main: If True, allow any main stat for slot 2/4/6 (preset 해제)
+        max_candidates_per_slot: For fast mode only, max candidates per slot
+        max_results: For fast mode only, max results limit
     
     Returns:
         Dict with:
@@ -56,44 +61,32 @@ def run_search(
         ...     runes=runes,
         ...     target="B",
         ...     mode="exhaustive",
-        ...     constraints={"CR": 100, "SPD": 100},
+        ...     constraints={"CR": 100, "SPD": 100, "MIN_SCORE": 4800},
         ...     objective="SCORE",
         ...     top_n=10
         ... )
         >>> print(f"Found {result['total_found']} builds")
-        >>> for build in result['results']:
-        ...     print(f"Score: {build['score']}")
     """
     if constraints is None:
         constraints = {}
     
-    # Use search_builds for constraint-based searches, optimize_lushen for simple top-N
-    if constraints or objective != "SCORE" or return_policy != "top_n" or not require_sets:
-        # Use search_builds for advanced features
-        results = search_builds(
-            runes=runes,
-            target=target,
-            base_atk=base_atk,
-            base_spd=base_spd,
-            constraints=constraints,
-            objective=objective,
-            top_n=top_n,
-            return_policy=return_policy,
-            max_results=max_results,
-            max_candidates_per_slot=max_candidates_per_slot,
-            mode=mode,
-            require_sets=require_sets
-        )
-    else:
-        # Use optimize_lushen for simple top-N searches
-        results = optimize_lushen(
-            runes=runes,
-            target=target,
-            base_atk=base_atk,
-            top_n=top_n,
-            max_candidates_per_slot=max_candidates_per_slot,
-            mode=mode
-        )
+    # Always use search_builds for unified API
+    results = search_builds(
+        runes=runes,
+        target=target,
+        base_atk=base_atk,
+        base_spd=base_spd,
+        constraints=constraints,
+        objective=objective,
+        top_n=top_n,
+        return_policy=return_policy,
+        return_all=return_all,
+        max_results=max_results,
+        max_candidates_per_slot=max_candidates_per_slot,
+        mode=mode,
+        require_sets=require_sets,
+        allow_any_main=allow_any_main
+    )
     
     return {
         "results": results,
@@ -105,9 +98,11 @@ def run_search(
             "objective": objective,
             "top_n": top_n,
             "return_policy": return_policy,
+            "return_all": return_all,
             "base_atk": base_atk,
             "base_spd": base_spd,
             "require_sets": require_sets,
+            "allow_any_main": allow_any_main,
         },
         "mode": mode,
     }

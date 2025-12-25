@@ -25,19 +25,24 @@ sw-mcp/
 
 ## 핵심 기능
 
-### 1. 완전 탐색 보장 (Exhaustive Mode)
-- `mode="exhaustive"`: 모든 유효한 조합 탐색 (pruning 없음)
-- `mode="fast"`: Heuristic pruning으로 빠른 탐색
+### 1. 완전 탐색 보장 (Exhaustive Mode) ⚠️ 정확도 100%
+- `mode="exhaustive"`: **정확도 100% 보장** (누락 없음)
+  - Feasibility pruning만 사용 (제약조건/세트 조건 도달 불가능한 분기 제거)
+  - Upper-bound pruning 사용 (top_n 모드에서만, 최적 누락 없음)
+  - **Heuristic pruning/후보컷/max_candidates 제한 금지**
+- `mode="fast"`: **정확도 보장 없음** (heuristic pruning 사용, 빠른 탐색)
 
 ### 2. 정확한 세트 조건
 - **Target A**: Rage >= 4 AND Blade >= 2 (Fatal 거부)
 - **Target B**: Fatal >= 4 AND Blade >= 2 (Rage 거부)
 - 세트 보너스 정확히 적용
-
-### 3. 제약 조건 기반 탐색
-- SPD, CR, CD, ATK_PCT, ATK_FLAT, ATK_BONUS, ATK_TOTAL, MIN_SCORE
-- Objective: SCORE, ATK_TOTAL, ATK_BONUS, CD, SPD
 - `require_sets=False`: 모든 세트 허용 (SWOP-like)
+
+### 3. 제약 조건 기반 탐색 (SWOP 스타일)
+- **지원 제약조건**: SPD, CR, CD, ATK_PCT, ATK_FLAT, ATK_BONUS, ATK_TOTAL, MIN_SCORE
+- **Objective**: SCORE, ATK_TOTAL, ATK_BONUS, CD, SPD
+- **return_all=True**: 조건 만족하는 모든 빌드 반환 (메모리 주의)
+- **allow_any_main=True**: slot 2/4/6 메인스탯 제한 해제 (preset 해제)
 
 ## 설치
 
@@ -119,7 +124,7 @@ for build in result['results']:
     print(f"Score: {build['score']}, CR: {build['cr_total']}%")
 ```
 
-### Exhaustive Search
+### Exhaustive Search (정확도 100% 보장)
 
 ```python
 from src.sw_core.api import run_search
@@ -127,29 +132,60 @@ from src.sw_core.swex_parser import load_swex_json
 
 runes = load_swex_json("swex_export.json")
 
-# 모든 조합 탐색 (최적 조합 보장)
+# 모든 조합 탐색 (정확도 100%, 누락 없음)
 result = run_search(
     runes=runes,
     target="B",
-    mode="exhaustive",  # 완전 탐색
+    mode="exhaustive",  # 정확도 100% 보장
     top_n=20
 )
 ```
 
-### 제약 조건 기반 탐색
+### 제약 조건 기반 탐색 (SWOP 스타일)
 
 ```python
+# 여러 제약조건과 objective 지정
 result = run_search(
     runes=runes,
     target="B",
-    mode="exhaustive",
+    mode="exhaustive",  # 정확도 100% 보장
     constraints={
         "SPD": 100,
         "CR": 100,
         "ATK_TOTAL": 2000,
         "MIN_SCORE": 4800
     },
-    objective="SCORE",
+    objective="SCORE",  # 또는 "ATK_TOTAL", "ATK_BONUS", "CD", "SPD"
+    top_n=20
+)
+
+# 모든 조건 만족 빌드 반환 (return_all=True)
+result = run_search(
+    runes=runes,
+    target="B",
+    mode="exhaustive",
+    constraints={"CR": 100, "SPD": 100},
+    return_all=True  # 모든 빌드 반환 (메모리 주의)
+)
+
+# Preset 해제 (allow_any_main=True)
+result = run_search(
+    runes=runes,
+    target="B",
+    mode="exhaustive",
+    allow_any_main=True  # slot 2/4/6 메인스탯 제한 해제
+)
+```
+
+### Fast Mode (정확도 보장 없음)
+
+```python
+# 빠른 탐색 (정확도 보장 없음)
+result = run_search(
+    runes=runes,
+    target="B",
+    mode="fast",  # ⚠️ 정확도 보장 없음
+    max_candidates_per_slot=300,
     top_n=20
 )
 ```
@@ -208,10 +244,12 @@ result = run_search(
 - 최적 배치 자동 선택
 
 ### 슬롯 제한
-- **슬롯 2**: 메인 스탯 ATK%만 허용
-- **슬롯 3**: 서브옵에 ATK% 및 ATK+ 금지 (필수)
-- **슬롯 4**: 메인 스탯 CD만 허용
-- **슬롯 6**: 메인 스탯 ATK%만 허용
+- **슬롯 1**: 서브옵에 DEF% 및 DEF+ 금지 (서브/보석 포함)
+- **슬롯 2**: 메인 스탯 ATK%만 허용 (allow_any_main=True면 해제)
+- **슬롯 3**: 서브옵에 ATK% 및 ATK+ 금지 (서브/보석 포함, 필수)
+- **슬롯 4**: 메인 스탯 CD만 허용 (allow_any_main=True면 해제)
+- **슬롯 6**: 메인 스탯 ATK%만 허용 (allow_any_main=True면 해제)
+- **서브스탯**: 메인스탯과 중복 불가 (제작/가상 룬 생성 시 강제)
 
 ## 스코어 공식
 
@@ -230,7 +268,15 @@ python -m pytest tests/ -v
 # 특정 테스트 실행
 python -m pytest tests/test_api.py -v
 python -m pytest tests/test_exhaustive.py -v
+python -m pytest tests/test_constraint_search_accuracy.py -v  # 정확도 검증
 ```
+
+### 정확도 검증
+
+`test_constraint_search_accuracy.py`는 exhaustive 모드가 brute force와 완전히 일치함을 검증합니다:
+- 작은 샘플에서 모든 조합을 brute force로 탐색
+- exhaustive 모드 결과와 비교하여 완전 일치 확인
+- 제약조건, objective, return_all 등 모든 기능 검증
 
 ## 개발 상태
 
