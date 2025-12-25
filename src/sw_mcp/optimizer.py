@@ -250,8 +250,11 @@ def calculate_max_remaining_stats(slot_runes: Dict[int, List[Rune]], start_slot:
 
 
 def check_set_requirements(state: DPState, slot_runes: Dict[int, List[Rune]], 
-                          current_slot: int, target: str) -> bool:
+                          current_slot: int, target: str, require_sets: bool = True) -> bool:
     """세트 요구사항을 만족할 수 있는지 확인 (pruning)"""
+    if not require_sets:
+        return True  # 세트 조건 체크 안 함
+    
     remaining_slots = 6 - current_slot
     
     # 남은 슬롯에서 얻을 수 있는 최대 세트 개수
@@ -285,10 +288,11 @@ def check_set_requirements(state: DPState, slot_runes: Dict[int, List[Rune]],
 
 def check_constraints(state: DPState, constraints: Dict[str, float], 
                      slot_runes: Dict[int, List[Rune]], current_slot: int,
-                     base_atk: int, base_spd: int, target: str = "B") -> bool:
+                     base_atk: int, base_spd: int, target: str = "B",
+                     require_sets: bool = True) -> bool:
     """제약 조건을 만족할 수 있는지 확인 (pruning)"""
     # 세트 요구사항 체크
-    if not check_set_requirements(state, slot_runes, current_slot, target):
+    if not check_set_requirements(state, slot_runes, current_slot, target, require_sets):
         return False
     
     if not constraints:
@@ -357,12 +361,23 @@ def check_constraints(state: DPState, constraints: Dict[str, float],
 def optimize_lushen(runes: List[Rune], target: str = "B", 
                     gem_mode: str = "none", grind_mode: str = "none",
                     top_n: int = 10, base_atk: int = 900,
-                    max_candidates_per_slot: int = 300) -> List[Dict]:
+                    max_candidates_per_slot: int = 300,
+                    mode: str = "exhaustive") -> List[Dict]:
     """
     루쉔 최적화
-    target: "A" (격노+칼날) 또는 "B" (맹공+칼날)
-    gem_mode: "none" (현재 미구현)
-    grind_mode: "none" (현재 미구현)
+    
+    Args:
+        runes: 룬 리스트
+        target: "A" (격노+칼날) 또는 "B" (맹공+칼날)
+        gem_mode: "none" (현재 미구현)
+        grind_mode: "none" (현재 미구현)
+        top_n: 상위 N개 반환
+        base_atk: 기본 공격력
+        max_candidates_per_slot: fast 모드에서 슬롯당 최대 후보 수
+        mode: "exhaustive" (모든 조합 탐색, 기본값) 또는 "fast" (heuristic pruning 사용)
+    
+    Returns:
+        최적 조합 리스트
     """
     # 슬롯별 룬 분리
     slot_runes = {}
@@ -371,83 +386,106 @@ def optimize_lushen(runes: List[Rune], target: str = "B",
         if not slot_runes[slot]:
             return []  # 필수 슬롯에 룬이 없으면 빈 결과
     
-    # DP: 슬롯별로 상태 전파
-    # dp[slot][state] = best_state (같은 상태에서 최선의 스탯만 유지)
-    dp = [{} for _ in range(7)]  # dp[0]은 초기 상태, dp[1~6]은 슬롯 1~6
-    
-    # 초기 상태
-    initial_state = DPState()
-    dp[0][initial_state] = initial_state
-    
-    # 슬롯별로 DP 진행
-    for slot in range(1, 7):
-        current_dp = {}
-        candidate_states = []
-        
-        for prev_state in dp[slot - 1].values():
-            # 세트 요구사항 pruning
-            if not check_set_requirements(prev_state, slot_runes, slot - 1, target):
-                continue
-            
-            for rune in slot_runes[slot]:
-                new_state = prev_state.add_rune(rune)
-                
-                # 세트 요구사항 pruning
-                if not check_set_requirements(new_state, slot_runes, slot, target):
-                    continue
-                
-                # 상태 키 생성 (세트 개수만으로)
-                state_key = (new_state.count_rage, new_state.count_fatal, 
-                           new_state.count_blade, new_state.count_intangible)
-                
-                # 동일 상태에서 더 나은 스탯만 유지
-                if state_key not in current_dp:
-                    current_dp[state_key] = new_state
-                    candidate_states.append(new_state)
-                else:
-                    existing = current_dp[state_key]
-                    # 휴리스틱 스코어 비교
-                    existing_score = calculate_heuristic_score(existing, base_atk)
-                    new_score = calculate_heuristic_score(new_state, base_atk)
-                    
-                    if new_score > existing_score:
-                        current_dp[state_key] = new_state
-                        # candidate_states에서 기존 것 제거하고 새 것 추가
-                        if existing in candidate_states:
-                            candidate_states.remove(existing)
-                        candidate_states.append(new_state)
-        
-        # 상위 K개만 유지 (후보 폭주 방지)
-        if len(candidate_states) > max_candidates_per_slot:
-            candidate_states.sort(key=lambda s: calculate_heuristic_score(s, base_atk), reverse=True)
-            candidate_states = candidate_states[:max_candidates_per_slot]
-            # current_dp도 상위 K개만 유지
-            current_dp = {s: current_dp.get((s.count_rage, s.count_fatal, s.count_blade, s.count_intangible), s) 
-                         for s in candidate_states}
-        
-        dp[slot] = current_dp
-    
-    # 최종 상태에서 최적 조합 찾기
     results = []
     rune_dict = {r.rune_id: r for r in runes}
     
-    for final_state in dp[6].values():
-        # 룬 조합 구성
-        rune_combo = [rune_dict[rid] for rid in final_state.rune_ids if rid in rune_dict]
+    if mode == "exhaustive":
+        # Exhaustive 모드: DFS로 모든 조합 탐색
+        def dfs_exhaustive(current_slot: int, state: DPState):
+            if current_slot > 6:
+                # 6개 슬롯 모두 선택 완료
+                rune_combo = [rune_dict[rid] for rid in state.rune_ids if rid in rune_dict]
+                if len(rune_combo) != 6:
+                    return
+                
+                # 무형 배치 최적화
+                assignment, score, stats = find_best_intangible_assignment(
+                    rune_combo, target, base_atk, require_cr_100=True, require_sets=True
+                )
+                
+                if score > 0:
+                    results.append({
+                        "runes": rune_combo,
+                        "score": score,
+                        "stats": stats,
+                        "intangible_assignment": assignment,
+                    })
+                return
+            
+            # 현재 슬롯의 룬들을 시도
+            for rune in slot_runes[current_slot]:
+                new_state = state.add_rune(rune)
+                dfs_exhaustive(current_slot + 1, new_state)
         
-        if len(rune_combo) != 6:
-            continue
+        initial_state = DPState()
+        dfs_exhaustive(1, initial_state)
+    
+    else:
+        # Fast 모드: DP with pruning
+        dp = [{} for _ in range(7)]
+        initial_state = DPState()
+        dp[0][initial_state] = initial_state
         
-        # 무형 배치 최적화
-        assignment, score, stats = find_best_intangible_assignment(rune_combo, target, base_atk)
+        for slot in range(1, 7):
+            current_dp = {}
+            candidate_states = []
+            
+            for prev_state in dp[slot - 1].values():
+                # 세트 요구사항 pruning
+                if not check_set_requirements(prev_state, slot_runes, slot - 1, target, require_sets=True):
+                    continue
+                
+                for rune in slot_runes[slot]:
+                    new_state = prev_state.add_rune(rune)
+                    
+                    # 세트 요구사항 pruning
+                    if not check_set_requirements(new_state, slot_runes, slot, target, require_sets=True):
+                        continue
+                    
+                    # 상태 키로 그룹화하여 최선만 유지
+                    state_key = (new_state.count_rage, new_state.count_fatal, 
+                               new_state.count_blade, new_state.count_intangible)
+                    
+                    if state_key not in current_dp:
+                        current_dp[state_key] = new_state
+                        candidate_states.append(new_state)
+                    else:
+                        existing = current_dp[state_key]
+                        existing_score = calculate_heuristic_score(existing, base_atk)
+                        new_score = calculate_heuristic_score(new_state, base_atk)
+                        
+                        if new_score > existing_score:
+                            current_dp[state_key] = new_state
+                            if existing in candidate_states:
+                                candidate_states.remove(existing)
+                            candidate_states.append(new_state)
+            
+            # 상위 K개만 유지
+            if len(candidate_states) > max_candidates_per_slot:
+                candidate_states.sort(key=lambda s: calculate_heuristic_score(s, base_atk), reverse=True)
+                candidate_states = candidate_states[:max_candidates_per_slot]
+                current_dp = {s: current_dp.get((s.count_rage, s.count_fatal, s.count_blade, s.count_intangible), s) 
+                             for s in candidate_states}
+            
+            dp[slot] = current_dp
         
-        if score > 0:
-            results.append({
-                "runes": rune_combo,
-                "score": score,
-                "stats": stats,
-                "intangible_assignment": assignment,
-            })
+        # 최종 상태에서 최적 조합 찾기
+        for final_state in dp[6].values():
+            rune_combo = [rune_dict[rid] for rid in final_state.rune_ids if rid in rune_dict]
+            if len(rune_combo) != 6:
+                continue
+            
+            assignment, score, stats = find_best_intangible_assignment(
+                rune_combo, target, base_atk, require_cr_100=True, require_sets=True
+            )
+            
+            if score > 0:
+                results.append({
+                    "runes": rune_combo,
+                    "score": score,
+                    "stats": stats,
+                    "intangible_assignment": assignment,
+                })
     
     # 스코어 기준 정렬
     results.sort(key=lambda x: x["score"], reverse=True)
@@ -500,7 +538,9 @@ def search_builds(runes: List[Rune], target: str = "B",
                   top_n: int = 20,
                   return_policy: str = "top_n",
                   max_results: int = 2000,
-                  max_candidates_per_slot: int = 300) -> List[Dict]:
+                  max_candidates_per_slot: int = 300,
+                  mode: str = "exhaustive",
+                  require_sets: bool = True) -> List[Dict]:
     """
     조건 기반 최적 조합 탐색
     
@@ -510,16 +550,32 @@ def search_builds(runes: List[Rune], target: str = "B",
         base_atk: 기본 공격력
         base_spd: 기본 속도
         constraints: 최소 조건 딕셔너리 (예: {"SPD": 100, "CR": 100, "ATK_TOTAL": 2000})
-        objective: 정렬 기준 ("SCORE", "ATK_TOTAL", "ATK_BONUS", "CD" 등)
+        objective: 정렬 기준 ("SCORE", "ATK_TOTAL", "ATK_BONUS", "CD", "SPD" 등)
         top_n: 상위 N개 반환
         return_policy: "top_n" 또는 "all_at_best"
-        max_results: 최대 결과 수 제한
+        max_results: fast 모드에서만 사용되는 최대 결과 수 제한 (exhaustive 모드에서는 무시)
+        max_candidates_per_slot: fast 모드에서 슬롯당 최대 후보 수
+        mode: "exhaustive" (모든 조합 탐색, 기본값) 또는 "fast" (heuristic pruning 사용)
+        require_sets: True면 target 세트 조건 필수, False면 모든 세트 허용 (SWOP-like)
     
     Returns:
         조건을 만족하는 조합 리스트
+    
+    Examples:
+        >>> # Exhaustive search with set requirements
+        >>> results = search_builds(runes, target="B", constraints={"CR": 100}, mode="exhaustive")
+        
+        >>> # Any set search (SWOP-like)
+        >>> results = search_builds(runes, require_sets=False, constraints={"CR": 100}, mode="exhaustive")
+        
+        >>> # Fast mode with top-K pruning
+        >>> results = search_builds(runes, mode="fast", max_candidates_per_slot=100)
     """
     if constraints is None:
         constraints = {}
+    
+    # CR>=100 hardcode 제거: constraints에 CR이 있으면 require_cr_100=False
+    require_cr_100 = "CR" not in constraints
     
     # 슬롯별 룬 분리
     slot_runes = {}
@@ -528,21 +584,22 @@ def search_builds(runes: List[Rune], target: str = "B",
         if not slot_runes[slot]:
             return []
     
-    # DFS로 모든 조합 탐색 (pruning 적용)
+    # DFS로 모든 조합 탐색
     results = []
     rune_dict = {r.rune_id: r for r in runes}
     
     def dfs(current_slot: int, state: DPState):
         """DFS로 조합 탐색"""
-        if len(results) >= max_results:
+        # fast 모드에서만 early stop
+        if mode == "fast" and len(results) >= max_results:
             return
         
-        # Pruning: 세트 요구사항 체크
-        if not check_set_requirements(state, slot_runes, current_slot, target):
+        # Pruning: 세트 요구사항 체크 (exhaustive 모드에서는 제외)
+        if mode == "fast" and not check_set_requirements(state, slot_runes, current_slot, target, require_sets):
             return
         
-        # Pruning: 제약 조건을 만족할 수 없으면 가지치기
-        if not check_constraints(state, constraints, slot_runes, current_slot, base_atk, base_spd, target):
+        # Pruning: 제약 조건을 만족할 수 없으면 가지치기 (exhaustive 모드에서도 constraints pruning은 유지)
+        if not check_constraints(state, constraints, slot_runes, current_slot, base_atk, base_spd, target, require_sets):
             return
         
         if current_slot > 6:
@@ -552,7 +609,9 @@ def search_builds(runes: List[Rune], target: str = "B",
                 return
             
             # 무형 배치 최적화
-            assignment, score, stats = find_best_intangible_assignment(rune_combo, target, base_atk)
+            assignment, score, stats = find_best_intangible_assignment(
+                rune_combo, target, base_atk, require_cr_100=require_cr_100, require_sets=require_sets
+            )
             
             if score <= 0:
                 return
@@ -575,6 +634,7 @@ def search_builds(runes: List[Rune], target: str = "B",
             if "MIN_SCORE" in constraints and score < constraints["MIN_SCORE"]:
                 return
             
+            # score > 0이고 constraints를 만족하면 유효한 빌드
             results.append({
                 "runes": rune_combo,
                 "score": score,
@@ -601,6 +661,8 @@ def search_builds(runes: List[Rune], target: str = "B",
         results.sort(key=lambda x: x["stats"]["atk_bonus"], reverse=True)
     elif objective == "CD":
         results.sort(key=lambda x: x["stats"]["cd_total"], reverse=True)
+    elif objective == "SPD":
+        results.sort(key=lambda x: x["stats"]["spd_total"], reverse=True)
     else:
         results.sort(key=lambda x: x["score"], reverse=True)
     
