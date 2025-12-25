@@ -1,6 +1,6 @@
-# SW-MCP - 서머너즈워 룬 최적화 엔진
+# SW-MCP - 서머너즈워 범용 룬 빌드 엔진
 
-서머너즈워 SWOP 수준의 정확도로 루쉔 최적화를 수행하는 Python 라이브러리입니다.
+서머너즈워 SWOP 수준의 정확도로 **모든 몬스터/모든 룬 세트**에 대한 빌드 탐색을 수행하는 범용 Python 라이브러리입니다.
 
 ## 프로젝트 구조
 
@@ -124,7 +124,7 @@ for build in result['results']:
     print(f"Score: {build['score']}, CR: {build['cr_total']}%")
 ```
 
-### Exhaustive Search (정확도 100% 보장)
+### 범용 빌드 탐색 (모든 몬스터/모든 세트)
 
 ```python
 from src.sw_core.api import run_search
@@ -132,48 +132,46 @@ from src.sw_core.swex_parser import load_swex_json
 
 runes = load_swex_json("swex_export.json")
 
-# 모든 조합 탐색 (정확도 100%, 누락 없음)
+# 예시 1: 루쉔 (공격형)
 result = run_search(
     runes=runes,
-    target="B",
+    base_atk=900,
+    base_spd=104,
+    constraints={"CR": 100, "SPD": 100, "ATK_TOTAL": 2000},
+    set_constraints={"Fatal": 4, "Blade": 2},  # 맹공+칼날
+    objective="SCORE",
     mode="exhaustive",  # 정확도 100% 보장
     top_n=20
 )
-```
 
-### 제약 조건 기반 탐색 (SWOP 스타일)
-
-```python
-# 여러 제약조건과 objective 지정
+# 예시 2: 모든 세트 허용 (SWOP-like)
 result = run_search(
     runes=runes,
-    target="B",
-    mode="exhaustive",  # 정확도 100% 보장
-    constraints={
-        "SPD": 100,
-        "CR": 100,
-        "ATK_TOTAL": 2000,
-        "MIN_SCORE": 4800
-    },
-    objective="SCORE",  # 또는 "ATK_TOTAL", "ATK_BONUS", "CD", "SPD"
-    top_n=20
+    base_atk=900,
+    base_spd=104,
+    constraints={"CR": 100, "SPD": 100},
+    set_constraints=None,  # 모든 세트 허용
+    objective="SCORE",
+    mode="exhaustive"
 )
 
-# 모든 조건 만족 빌드 반환 (return_all=True)
+# 예시 3: 탱커 (체력/방어 중심)
 result = run_search(
     runes=runes,
-    target="B",
-    mode="exhaustive",
+    base_hp=15000,
+    base_def=800,
+    constraints={"HP_TOTAL": 30000, "DEF_TOTAL": 1500},
+    set_constraints={"Energy": 2, "Guard": 2},  # 에너지+가드
+    objective="EHP",  # Effective HP
+    mode="exhaustive"
+)
+
+# 예시 4: 모든 조건 만족 빌드 반환
+result = run_search(
+    runes=runes,
+    base_atk=900,
     constraints={"CR": 100, "SPD": 100},
     return_all=True  # 모든 빌드 반환 (메모리 주의)
-)
-
-# Preset 해제 (allow_any_main=True)
-result = run_search(
-    runes=runes,
-    target="B",
-    mode="exhaustive",
-    allow_any_main=True  # slot 2/4/6 메인스탯 제한 해제
 )
 ```
 
@@ -266,17 +264,15 @@ atk_total = base_atk + atk_bonus
 python -m pytest tests/ -v
 
 # 특정 테스트 실행
-python -m pytest tests/test_api.py -v
-python -m pytest tests/test_exhaustive.py -v
+python -m pytest tests/test_generic_engine.py -v  # 범용 엔진 테스트
 python -m pytest tests/test_constraint_search_accuracy.py -v  # 정확도 검증
 ```
 
-### 정확도 검증
+### 테스트 커버리지
 
-`test_constraint_search_accuracy.py`는 exhaustive 모드가 brute force와 완전히 일치함을 검증합니다:
-- 작은 샘플에서 모든 조합을 brute force로 탐색
-- exhaustive 모드 결과와 비교하여 완전 일치 확인
-- 제약조건, objective, return_all 등 모든 기능 검증
+- **게임 룰 검증**: 슬롯별 메인/서브 제약, 중복 금지
+- **범용 기능**: 모든 세트 허용, set_constraints, 범용 objectives
+- **정확도 검증**: exhaustive 모드가 brute force와 완전 일치
 
 ## 개발 상태
 
