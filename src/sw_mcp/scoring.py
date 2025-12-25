@@ -4,12 +4,13 @@ from typing import List, Tuple, Optional
 from .types import Rune, BASE_CR, BASE_CD, RAGE_4SET_CD, FATAL_4SET_ATK_PCT, BLADE_2SET_CR, STAT_ID_NAME
 
 
-def count_sets(runes: List[Rune], intangible_assignment: str = "none") -> Tuple[int, int, int]:
+def count_sets(runes: List[Rune], intangible_assignment: str = "none") -> Tuple[int, int, int, int]:
     """
     세트 개수 계산
-    Returns: (rage_or_fatal_count, blade_count, intangible_count)
+    Returns: (rage_count, fatal_count, blade_count, intangible_count)
     """
-    rage_or_fatal_count = 0
+    rage_count = 0
+    fatal_count = 0
     blade_count = 0
     intangible_count = 0
     
@@ -17,20 +18,22 @@ def count_sets(runes: List[Rune], intangible_assignment: str = "none") -> Tuple[
         if rune.intangible:
             intangible_count += 1
         elif rune.set_id == 5:  # Rage
-            rage_or_fatal_count += 1
+            rage_count += 1
         elif rune.set_id == 8:  # Fatal
-            rage_or_fatal_count += 1
+            fatal_count += 1
         elif rune.set_id == 4:  # Blade
             blade_count += 1
     
     # 무형 배치 적용
     if intangible_count > 0 and intangible_assignment != "none":
-        if intangible_assignment in ["to_Rage", "to_Fatal"]:
-            rage_or_fatal_count += intangible_count
+        if intangible_assignment == "to_Rage":
+            rage_count += intangible_count
+        elif intangible_assignment == "to_Fatal":
+            fatal_count += intangible_count
         elif intangible_assignment == "to_Blade":
             blade_count += intangible_count
     
-    return rage_or_fatal_count, blade_count, intangible_count
+    return rage_count, fatal_count, blade_count, intangible_count
 
 
 def calculate_stats(runes: List[Rune], intangible_assignment: str = "none", base_atk: int = 900) -> dict:
@@ -83,26 +86,15 @@ def calculate_stats(runes: List[Rune], intangible_assignment: str = "none", base
                 spd_total += sub.value
     
     # 세트 보너스 계산
-    rage_or_fatal_count, blade_count, intangible_count = count_sets(runes, intangible_assignment)
+    rage_count, fatal_count, blade_count, intangible_count = count_sets(runes, intangible_assignment)
     
-    # Rage 4세트: CD +40 또는 Fatal 4세트: ATK% +35
-    if rage_or_fatal_count >= 4:
-        # Rage인지 Fatal인지 확인 (무형 배치 고려)
-        has_rage = any(r.set_id == 5 for r in runes)
-        has_fatal = any(r.set_id == 8 for r in runes)
-        
-        # 무형이 Rage/Fatal에 배치된 경우
-        if intangible_assignment == "to_Rage":
-            has_rage = True
-        elif intangible_assignment == "to_Fatal":
-            has_fatal = True
-        
-        # Rage와 Fatal이 모두 있으면 Rage 우선 (일반적으로는 발생하지 않음)
-        if has_rage:
-            cd_total += RAGE_4SET_CD
-        elif has_fatal:
-            # Fatal 4세트: ATK% +35
-            atk_pct_total += FATAL_4SET_ATK_PCT
+    # Rage 4세트: CD +40
+    if rage_count >= 4:
+        cd_total += RAGE_4SET_CD
+    
+    # Fatal 4세트: ATK% +35
+    if fatal_count >= 4:
+        atk_pct_total += FATAL_4SET_ATK_PCT
     
     # Blade 2세트: CR +12 (2세트 이상일 때)
     if blade_count >= 2:
@@ -124,12 +116,14 @@ def calculate_stats(runes: List[Rune], intangible_assignment: str = "none", base
 
 
 def score_build(runes: List[Rune], target: str = "B", intangible_assignment: str = "none", 
-                base_atk: int = 900) -> Tuple[float, dict]:
+                base_atk: int = 900, require_cr_100: bool = True, require_sets: bool = True) -> Tuple[float, dict]:
     """
     빌드 스코어 계산
     target: "A" (격노+칼날) 또는 "B" (맹공+칼날)
     intangible_assignment: "to_Rage", "to_Fatal", "to_Blade", "none"
     base_atk: 기본 공격력 (기본값 900)
+    require_cr_100: CR >= 100 필수 여부 (기본값 True, constraints에 CR이 있으면 False로 설정)
+    require_sets: 세트 조건 필수 여부 (기본값 True, require_sets=False면 모든 세트 허용)
     
     Returns: (score, stats_dict)
     """
@@ -147,25 +141,32 @@ def score_build(runes: List[Rune], target: str = "B", intangible_assignment: str
     cd_total = stats["cd_total"]
     atk_bonus = stats["atk_bonus"]
     
-    # 치확 조건 확인 (BASE_CR 15 + Blade 12 + 룬 치확 >= 100)
-    if cr_total < 100.0:
+    # 치확 조건 확인 (require_cr_100가 True일 때만)
+    if require_cr_100 and cr_total < 100.0:
         return 0.0, stats
     
-    # 세트 조건 확인
-    rage_or_fatal_count, blade_count, _ = count_sets(runes, intangible_assignment)
-    
-    if target == "A":
-        # 격노+칼날: Rage 4세트 + Blade 2세트
-        if rage_or_fatal_count < 4 or blade_count < 2:
-            return 0.0, stats
-    elif target == "B":
-        # 맹공+칼날: Fatal 4세트 + Blade 2세트
-        if rage_or_fatal_count < 4 or blade_count < 2:
-            return 0.0, stats
-        # Fatal인지 확인 (무형 배치 고려)
-        has_fatal = any(r.set_id == 8 for r in runes)
-        if not has_fatal and intangible_assignment != "to_Fatal":
-            return 0.0, stats
+    # 세트 조건 확인 (require_sets가 True일 때만)
+    if require_sets:
+        rage_count, fatal_count, blade_count, _ = count_sets(runes, intangible_assignment)
+        
+        if target == "A":
+            # 격노+칼날: Rage >= 4 AND Blade >= 2 (Fatal 허용 안 함)
+            rage_with_intangible = rage_count + (intangible_count if intangible_assignment == "to_Rage" else 0)
+            blade_with_intangible = blade_count + (intangible_count if intangible_assignment == "to_Blade" else 0)
+            if rage_with_intangible < 4 or blade_with_intangible < 2:
+                return 0.0, stats
+            # Fatal이 있으면 거부
+            if fatal_count > 0:
+                return 0.0, stats
+        elif target == "B":
+            # 맹공+칼날: Fatal >= 4 AND Blade >= 2 (Rage 허용 안 함)
+            fatal_with_intangible = fatal_count + (intangible_count if intangible_assignment == "to_Fatal" else 0)
+            blade_with_intangible = blade_count + (intangible_count if intangible_assignment == "to_Blade" else 0)
+            if fatal_with_intangible < 4 or blade_with_intangible < 2:
+                return 0.0, stats
+            # Rage가 있으면 거부
+            if rage_count > 0:
+                return 0.0, stats
     
     # 스코어 계산: (cd_total * 10) + atk_bonus + 200
     score = (cd_total * 10) + atk_bonus + 200
@@ -176,7 +177,8 @@ def score_build(runes: List[Rune], target: str = "B", intangible_assignment: str
     return score, stats
 
 
-def find_best_intangible_assignment(runes: List[Rune], target: str = "B", base_atk: int = 900) -> Tuple[str, float, dict]:
+def find_best_intangible_assignment(runes: List[Rune], target: str = "B", base_atk: int = 900,
+                                   require_cr_100: bool = True, require_sets: bool = True) -> Tuple[str, float, dict]:
     """
     무형 룬의 최적 배치 찾기
     Returns: (best_assignment, best_score, best_stats)
@@ -185,7 +187,7 @@ def find_best_intangible_assignment(runes: List[Rune], target: str = "B", base_a
     
     if not intangible_runes:
         # 무형 룬이 없으면 일반 계산
-        score, stats = score_build(runes, target, "none", base_atk)
+        score, stats = score_build(runes, target, "none", base_atk, require_cr_100, require_sets)
         return "none", score, stats
     
     # 무형 룬이 있으면 배치 옵션 평가 (최대 1개만 허용)
@@ -199,7 +201,7 @@ def find_best_intangible_assignment(runes: List[Rune], target: str = "B", base_a
     else:  # target == "B"
         assignment = "to_Fatal"
     
-    score, stats = score_build(runes, target, assignment, base_atk)
+    score, stats = score_build(runes, target, assignment, base_atk, require_cr_100, require_sets)
     if score > best_score:
         best_score = score
         best_assignment = assignment
@@ -207,14 +209,14 @@ def find_best_intangible_assignment(runes: List[Rune], target: str = "B", base_a
     
     # 옵션 2: Blade에 붙이기
     assignment = "to_Blade"
-    score, stats = score_build(runes, target, assignment, base_atk)
+    score, stats = score_build(runes, target, assignment, base_atk, require_cr_100, require_sets)
     if score > best_score:
         best_score = score
         best_assignment = assignment
         best_stats = stats
     
     # 옵션 3: 무형 없이
-    score, stats = score_build(runes, target, "none", base_atk)
+    score, stats = score_build(runes, target, "none", base_atk, require_cr_100, require_sets)
     if score > best_score:
         best_score = score
         best_assignment = "none"
