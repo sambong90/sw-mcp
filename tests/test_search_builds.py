@@ -1,8 +1,8 @@
 """search_builds 테스트"""
 
 import pytest
-from src.sw_mcp.types import Rune, SubStat
-from src.sw_mcp.optimizer import search_builds
+from src.sw_core.types import Rune, SubStat
+from src.sw_core.optimizer import search_builds
 
 
 def create_test_rune(rune_id, slot, set_id, main_stat_id, main_value, subs=None, prefix_stat_id=0, prefix_stat_value=0.0):

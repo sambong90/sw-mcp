@@ -1,13 +1,13 @@
-"""파서 테스트"""
+"""?�서 ?�스??""
 
 import json
 import pytest
-from src.sw_mcp.swex_parser import parse_rune, parse_swex_json
-from src.sw_mcp.types import Rune
+from src.sw_core.swex_parser import parse_rune, parse_swex_json
+from src.sw_core.types import Rune
 
 
 def test_parse_rune_intangible():
-    """무형 룬 파싱 테스트 (set_id=25)"""
+    """무형 �??�싱 ?�스??(set_id=25)"""
     raw_rune = {
         "rune_id": 12345,
         "slot_no": 1,
@@ -30,7 +30,7 @@ def test_parse_rune_intangible():
 
 
 def test_parse_rune_with_grind():
-    """연마가 포함된 룬 파싱 테스트"""
+    """?�마가 ?�함??�??�싱 ?�스??""
     raw_rune = {
         "rune_id": 12346,
         "slot_no": 2,
@@ -60,7 +60,7 @@ def test_parse_rune_with_grind():
 
 
 def test_parse_swex_json_merge():
-    """rune_list와 unit_list 병합 테스트"""
+    """rune_list?� unit_list 병합 ?�스??""
     json_data = {
         "runes": [
             {
@@ -73,7 +73,7 @@ def test_parse_swex_json_merge():
                 "rank": 5
             }
         ],
-        "unit_list": [  # unit_list 우선 확인
+        "unit_list": [  # unit_list ?�선 ?�인
             {
                 "runes": [
                     {
@@ -86,7 +86,7 @@ def test_parse_swex_json_merge():
                         "rank": 5
                     },
                     {
-                        "rune_id": 100,  # 중복 (rune_list에도 있음)
+                        "rune_id": 100,  # 중복 (rune_list?�도 ?�음)
                         "slot_no": 1,
                         "set_id": 5,
                         "pri_eff": [4, 63],
@@ -97,7 +97,7 @@ def test_parse_swex_json_merge():
                 ]
             }
         ],
-        "units": [  # units도 확인
+        "units": [  # units???�인
             {
                 "runes": [
                     {
@@ -117,16 +117,16 @@ def test_parse_swex_json_merge():
     runes = parse_swex_json(json_data)
     rune_ids = [r.rune_id for r in runes]
     
-    # 중복 제거 확인 및 unit_list 읽기 확인
+    # 중복 ?�거 ?�인 �?unit_list ?�기 ?�인
     assert len(runes) == 3
     assert 100 in rune_ids
     assert 200 in rune_ids
     assert 300 in rune_ids
-    assert rune_ids.count(100) == 1  # 중복 없음
+    assert rune_ids.count(100) == 1  # 중복 ?�음
 
 
 def test_parse_rune_prefix_eff():
-    """prefix_eff 파싱 테스트"""
+    """prefix_eff ?�싱 ?�스??""
     raw_rune = {
         "rune_id": 12347,
         "slot_no": 1,
@@ -145,7 +145,7 @@ def test_parse_rune_prefix_eff():
     assert rune.prefix_stat_value == 5.0
     assert rune.prefix_stat_name == "CR"
     
-    # prefix_eff가 0인 경우
+    # prefix_eff가 0??경우
     raw_rune2 = {
         "rune_id": 12348,
         "slot_no": 2,
