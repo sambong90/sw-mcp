@@ -10,7 +10,12 @@ setup(
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     python_requires=">=3.8",
-    install_requires=[],
-    tests_require=["pytest"],
+    install_requires=[
+        "pydantic>=2.0.0",
+    ],
+    tests_require=["pytest>=7.0.0"],
+    extras_require={
+        "dev": ["pytest>=7.0.0", "black", "flake8"],
+    },
 )
 
