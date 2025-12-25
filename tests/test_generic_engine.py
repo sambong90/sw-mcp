@@ -234,7 +234,7 @@ def test_exhaustive_vs_brute_force():
         if not validate_build(combo_list):
             continue
         
-        score, stats, _ = score_build(
+        score, stats, intangible_assignment = score_build(
             combo_list,
             objective="SCORE",
             base_atk=900,
