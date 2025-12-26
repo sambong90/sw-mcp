@@ -65,7 +65,8 @@ def test_upsert_raw_insert(temp_db):
 
 def test_upsert_raw_update(temp_db):
     """Test update when hash changes"""
-    repo = SwarfarmRepository()
+    from src.sw_mcp.db.engine import get_session
+    repo = SwarfarmRepository(session=get_session(temp_db))
     
     # First insert
     payload1 = {"id": 1, "name": "Test", "value": 100}
@@ -121,7 +122,8 @@ def test_upsert_raw_update(temp_db):
 
 def test_upsert_raw_unchanged(temp_db):
     """Test unchanged (same hash)"""
-    repo = SwarfarmRepository()
+    from src.sw_mcp.db.engine import get_session
+    repo = SwarfarmRepository(session=get_session(temp_db))
     
     payload = {"id": 1, "name": "Test", "value": 100}
     

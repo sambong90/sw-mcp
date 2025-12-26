@@ -50,8 +50,9 @@ def test_sync_endpoint_200(temp_db, mock_list_response):
         mock_client.request.return_value = mock_response
         mock_client_class.return_value = mock_client
         
-        client = SwarfarmClient(rps=0)
-        repo = SwarfarmRepository()
+            from src.sw_mcp.db.engine import get_session
+            client = SwarfarmClient(rps=0)
+            repo = SwarfarmRepository(session=get_session(temp_db))
         
         try:
             stats = sync_endpoint(
@@ -88,8 +89,9 @@ def test_sync_endpoint_304(temp_db):
         mock_client.request.return_value = mock_response
         mock_client_class.return_value = mock_client
         
-        client = SwarfarmClient(rps=0)
-        repo = SwarfarmRepository()
+            from src.sw_mcp.db.engine import get_session
+            client = SwarfarmClient(rps=0)
+            repo = SwarfarmRepository(session=get_session(temp_db))
         
         # Set up existing state
         repo.upsert_sync_state(

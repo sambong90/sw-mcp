@@ -16,10 +16,6 @@ def get_engine(db_url: str = None):
 
 def get_session(db_url: str = None) -> Session:
     """DB 세션 반환"""
-    global _Session
-    if _Session is None:
-        engine = get_engine(db_url)
-        _Session = sessionmaker(bind=engine)
-    
-    return _Session()
-
+    engine = get_engine(db_url)
+    Session = sessionmaker(bind=engine)
+    return Session()

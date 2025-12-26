@@ -100,22 +100,19 @@ def sync_endpoint(
         new_etag = response.headers.get("ETag")
         new_last_modified = response.headers.get("Last-Modified")
         
-        # Parse first page to get pagination info
+        # Parse first page
         data = response.json()
-        list_url = endpoint_url
         
-        # Iterate pagination
-        item_count = 0
-        for item in paginate_list(client, list_url, etag, last_modified, max_pages):
-            item_count += 1
-            
+        # Helper function to process items
+        def process_item(item):
+            nonlocal stats
             # Extract object_id
             object_id = item.get("id")
             if object_id is None:
                 stats["errors"] += 1
                 if verbose:
                     print(f"    Warning: Item missing 'id' in {endpoint_name}")
-                continue
+                return
             
             # Extract com2us_id if available
             com2us_id = item.get("com2us_id")
@@ -144,6 +141,24 @@ def sync_endpoint(
                 stats["errors"] += 1
                 if verbose:
                     print(f"    Error upserting {endpoint_name}/{object_id}: {e}")
+        
+        # Process first page
+        item_count = 0
+        for item in data.get("results", []):
+            item_count += 1
+            process_item(item)
+        
+        # Continue pagination if next URL exists
+        next_url = data.get("next")
+        if next_url:
+            # Convert relative URL to absolute
+            if not next_url.startswith("http"):
+                next_url = urljoin(client.base_url, next_url)
+            
+            # Continue pagination (without conditional headers)
+            for item in paginate_list(client, next_url, None, None, max_pages):
+                item_count += 1
+                process_item(item)
         
         # Update sync state
         repo.upsert_sync_state(
@@ -254,4 +269,3 @@ def sync_all(
         print(f"  Errors: {stats.errors_total}")
     
     return stats
-
