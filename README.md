@@ -148,9 +148,114 @@ stats = registry.get(name="Lushen")
 stats = registry.get(name="루쉔")
 ```
 
-## SWARFARM 몬스터 기본 스탯 DB 동기화
+## SWARFARM API v2 전체 데이터 수집 시스템
+
+SWARFARM API v2의 모든 엔드포인트를 동적으로 발견하고, 모든 리소스를 DB에 raw JSON으로 저장하는 범용 수집 시스템입니다.
+
+### 주요 기능
+
+- **동적 엔드포인트 발견**: API root에서 모든 엔드포인트를 자동 발견
+- **Raw JSON 저장**: 정규화 없이 원본 JSON 저장 (스키마 변경에 견고)
+- **증분 업데이트**: Hash 기반으로 변경된 객체만 업데이트
+- **HTTP 요청 최소화**: ETag/Last-Modified로 304 Not Modified 활용
+- **견고한 에러 처리**: Rate limit, 재시도, 백오프 지원
+- **일일 자동화**: OS 스케줄러 또는 APScheduler 지원
+
+### 초기 동기화
+
+```bash
+# 모든 엔드포인트 발견 및 동기화
+python -m src.sw_mcp.cli swarfarm-sync --all
+
+# 특정 엔드포인트만 동기화
+python -m src.sw_mcp.cli swarfarm-sync --endpoint monsters
+
+# 엔드포인트 목록 확인
+python -m src.sw_mcp.cli swarfarm-discover
+```
+
+### 옵션
+
+- `--db-url <URL>`: DB URL (기본값: 환경변수 `SW_MCP_DB_URL` 또는 `sqlite:///sw_mcp.db`)
+- `--rps <N>`: Rate limit (초당 요청 수, 기본값: 2.0)
+- `--max-pages <N>`: 최대 페이지 수 (디버그용)
+- `--no-changelog`: Change log 비활성화
+
+### 증분 업데이트 작동 방식
+
+1. **Hash 기반 변경 감지**: 각 객체의 canonical JSON을 SHA256 해시로 저장
+2. **304 Not Modified**: ETag/Last-Modified 헤더로 변경 없으면 전체 스킵
+3. **Upsert 로직**:
+   - 새 객체: INSERT
+   - Hash 변경: UPDATE
+   - Hash 동일: NO-OP (변경 없음)
+
+### HTTP 요청 최소화
+
+- **ETag 지원**: `If-None-Match` 헤더로 조건부 요청
+- **Last-Modified 지원**: `If-Modified-Since` 헤더로 조건부 요청
+- **304 응답**: 변경 없으면 전체 pagination 스킵
+- **Rate Limiting**: 초당 요청 수 제한 (기본 2 RPS)
+
+### 견고성
+
+- **재시도**: 429/5xx 에러 시 exponential backoff + jitter (최대 6회)
+- **Rate Limit**: 환경변수 `SW_MCP_HTTP_RPS`로 제어
+- **방어적 파싱**: 필드 누락/스키마 변경에 견고
+
+### 일일 자동화
+
+#### A) OS 스케줄러 (권장)
+
+**Linux (cron):**
+```bash
+# 매일 새벽 4시 실행
+0 4 * * * cd /path/to/sw-mcp && python -m src.sw_mcp.cli swarfarm-sync --all
+```
+
+**Windows (Task Scheduler):**
+- 작업 스케줄러에서 새 작업 생성
+- 트리거: 매일 04:00
+- 작업: `python -m src.sw_mcp.cli swarfarm-sync --all`
+
+#### B) APScheduler (선택)
+
+```bash
+# 환경변수 설정
+export SW_MCP_ENABLE_SCHEDULER=1
+export SW_MCP_SCHEDULE_HOUR=4
+export SW_MCP_SCHEDULE_TIMEZONE=Asia/Seoul
+
+# 스케줄러 실행 (프로세스가 계속 실행되어야 함)
+python -m src.sw_mcp.scheduler
+```
+
+### DB 스키마
+
+**swarfarm_raw**: Raw JSON 저장
+- `endpoint`, `object_id` (PK)
+- `com2us_id` (인덱스)
+- `payload_json` (canonical JSON)
+- `payload_hash` (SHA256)
+- `source_url`, `fetched_at`
+
+**swarfarm_sync_state**: 엔드포인트별 동기화 상태
+- `endpoint` (PK)
+- `list_url`, `etag`, `last_modified`
+- `last_run_at`, `last_success_at`, `last_count`, `last_error`
+
+**swarfarm_change_log**: 변경 이력 (선택)
+- `endpoint`, `object_id`, `change_type` (insert/update)
+- `old_hash`, `new_hash`, `changed_at`
+
+**swarfarm_snapshot**: 동기화 실행 요약
+- 실행 시간, 통계 (inserted/updated/unchanged/errors)
+
+## SWARFARM 몬스터 기본 스탯 DB 동기화 (레거시)
 
 SWARFARM API를 통해 모든 몬스터의 기본 스탯을 DB에 저장하여, 룬 최적화 시 자동으로 사용할 수 있습니다.
+
+> **참고**: 이 기능은 새로운 전체 수집 시스템으로 대체되었습니다. 위의 `swarfarm-sync --all` 명령을 사용하세요.
 
 ### 초기 동기화
 

@@ -1,82 +1,90 @@
-"""DB 모델"""
+"""Database models for SWARFARM ingestion"""
 
 import json
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, DateTime, Index, CheckConstraint, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
 
 
-class MonsterBase(Base):
-    """몬스터 기본 스탯 테이블 (SWARFARM 데이터)"""
-    __tablename__ = "monster_base"
+class SwarfarmRaw(Base):
+    """Raw JSON storage for SWARFARM objects"""
+    __tablename__ = "swarfarm_raw"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    com2us_id = Column(Integer, unique=True, nullable=False, index=True)  # SWEX unit_master_id 매칭 키
-    swarfarm_id = Column(Integer, nullable=True, index=True)  # SWARFARM API의 id
-    name = Column(String(100), nullable=False)
-    element = Column(String(20), nullable=False)  # fire, water, wind, light, dark
-    archetype = Column(String(50), nullable=True)  # attack, defense, hp, support, etc.
+    endpoint = Column(String(100), nullable=False, primary_key=True)
+    object_id = Column(Integer, nullable=False, primary_key=True)
+    com2us_id = Column(Integer, nullable=True, index=True)
+    payload_json = Column(Text, nullable=False)  # Canonical JSON string
+    payload_hash = Column(String(64), nullable=False, index=True)  # SHA256 hex
+    source_url = Column(String(500), nullable=False)
+    fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     
-    # 기본 스탯
-    base_hp = Column(Integer, nullable=False)
-    base_attack = Column(Integer, nullable=False)
-    base_defense = Column(Integer, nullable=False)
-    speed = Column(Integer, nullable=False)
-    
-    # 추가 스탯
-    crit_rate = Column(Float, nullable=True, default=15.0)  # 기본값 15
-    crit_damage = Column(Float, nullable=True, default=50.0)  # 기본값 50
-    resistance = Column(Float, nullable=True, default=0.0)
-    accuracy = Column(Float, nullable=True, default=0.0)
-    
-    # 등급/각성 정보
-    base_stars = Column(Integer, nullable=True)
-    natural_stars = Column(Integer, nullable=False)
-    awaken_level = Column(Integer, nullable=True, default=0)
-    
-    # 관계 정보
-    family_id = Column(Integer, nullable=True)
-    skill_group_id = Column(Integer, nullable=True)
-    
-    # 스킬 리스트 (JSON 문자열로 저장)
-    skills_json = Column(Text, nullable=True)
-    
-    # 메타데이터
-    updated_at_local = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # 인덱스
     __table_args__ = (
-        UniqueConstraint('com2us_id', name='uq_monster_base_com2us_id'),
-        Index('idx_monster_base_com2us_id', 'com2us_id'),
-        Index('idx_monster_base_swarfarm_id', 'swarfarm_id'),
+        UniqueConstraint('endpoint', 'object_id', name='uq_swarfarm_raw_endpoint_object'),
+        Index('idx_swarfarm_raw_endpoint', 'endpoint'),
+        Index('idx_swarfarm_raw_com2us_id', 'com2us_id'),
+        Index('idx_swarfarm_raw_payload_hash', 'payload_hash'),
     )
     
-    def to_dict(self) -> dict:
-        """딕셔너리로 변환"""
-        return {
-            "com2us_id": self.com2us_id,
-            "swarfarm_id": self.swarfarm_id,
-            "name": self.name,
-            "element": self.element,
-            "archetype": self.archetype,
-            "base_hp": self.base_hp,
-            "base_attack": self.base_attack,
-            "base_defense": self.base_defense,
-            "speed": self.speed,
-            "crit_rate": self.crit_rate,
-            "crit_damage": self.crit_damage,
-            "resistance": self.resistance,
-            "accuracy": self.accuracy,
-            "base_stars": self.base_stars,
-            "natural_stars": self.natural_stars,
-            "awaken_level": self.awaken_level,
-            "family_id": self.family_id,
-            "skill_group_id": self.skill_group_id,
-            "skills": json.loads(self.skills_json) if self.skills_json else [],
-        }
+    def __repr__(self):
+        return f"<SwarfarmRaw(endpoint='{self.endpoint}', object_id={self.object_id})>"
+
+
+class SwarfarmSyncState(Base):
+    """Sync state per endpoint"""
+    __tablename__ = "swarfarm_sync_state"
+    
+    endpoint = Column(String(100), primary_key=True)
+    list_url = Column(String(500), nullable=False)
+    etag = Column(String(200), nullable=True)
+    last_modified = Column(String(200), nullable=True)
+    last_run_at = Column(DateTime, nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
+    last_count = Column(Integer, nullable=True)
+    last_error = Column(Text, nullable=True)
     
     def __repr__(self):
-        return f"<MonsterBase(com2us_id={self.com2us_id}, name='{self.name}')>"
+        return f"<SwarfarmSyncState(endpoint='{self.endpoint}')>"
 
+
+class SwarfarmChangeLog(Base):
+    """Change log for insert/update events"""
+    __tablename__ = "swarfarm_change_log"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    endpoint = Column(String(100), nullable=False, index=True)
+    object_id = Column(Integer, nullable=False, index=True)
+    change_type = Column(String(20), nullable=False)  # 'insert' or 'update'
+    old_hash = Column(String(64), nullable=True)
+    new_hash = Column(String(64), nullable=False)
+    changed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    
+    __table_args__ = (
+        CheckConstraint("change_type IN ('insert', 'update')", name='chk_change_type'),
+        Index('idx_swarfarm_change_log_endpoint', 'endpoint'),
+        Index('idx_swarfarm_change_log_object_id', 'object_id'),
+    )
+    
+    def __repr__(self):
+        return f"<SwarfarmChangeLog(endpoint='{self.endpoint}', object_id={self.object_id}, type='{self.change_type}')>"
+
+
+class SwarfarmSnapshot(Base):
+    """Snapshot summary for each sync run"""
+    __tablename__ = "swarfarm_snapshot"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    started_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+    endpoints_total = Column(Integer, nullable=False)
+    endpoints_changed = Column(Integer, nullable=False)
+    endpoints_304 = Column(Integer, nullable=False)
+    objects_inserted = Column(Integer, nullable=False)
+    objects_updated = Column(Integer, nullable=False)
+    objects_unchanged = Column(Integer, nullable=False)
+    errors_total = Column(Integer, nullable=False)
+    summary_json = Column(Text, nullable=True)  # Additional details as JSON
+    
+    def __repr__(self):
+        return f"<SwarfarmSnapshot(id={self.id}, started_at={self.started_at})>"

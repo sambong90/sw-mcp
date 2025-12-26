@@ -1,127 +1,203 @@
-"""DB 레포지토리"""
+"""Repository for SWARFARM data"""
 
 import json
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
-from .models import MonsterBase, Base
+from .models import SwarfarmRaw, SwarfarmSyncState, SwarfarmChangeLog, SwarfarmSnapshot, Base
 from .engine import get_engine, get_session
 
 
-class MonsterRepository:
-    """몬스터 레포지토리"""
+class SwarfarmRepository:
+    """Repository for SWARFARM data operations"""
     
     def __init__(self, session: Optional[Session] = None):
         """
         Args:
-            session: SQLAlchemy 세션 (None이면 새로 생성)
+            session: SQLAlchemy session (None = create new)
         """
         self.session = session or get_session()
         self._own_session = session is None
     
-    def upsert(self, monster_data: Dict[str, Any]) -> MonsterBase:
+    def upsert_raw(
+        self,
+        endpoint: str,
+        object_id: int,
+        payload: Dict[str, Any],
+        source_url: str,
+        com2us_id: Optional[int] = None,
+        enable_changelog: bool = True,
+    ) -> Tuple[str, bool, bool]:
         """
-        몬스터 데이터 업서트 (com2us_id 기준)
+        Upsert raw object (insert if new, update if hash changed)
         
         Args:
-            monster_data: SWARFARM API에서 받은 몬스터 데이터
+            endpoint: Endpoint name
+            object_id: Object ID
+            payload: Object payload (dict)
+            source_url: Source URL
+            com2us_id: Optional com2us_id from payload
+            enable_changelog: Whether to log changes
         
         Returns:
-            MonsterBase 인스턴스
-        
-        Raises:
-            ValueError: com2us_id가 없거나 필수 스탯이 모두 None인 경우
+            (payload_hash, is_insert, is_update) tuple
         """
-        # com2us_id 추출 (방어적 파싱)
-        com2us_id = monster_data.get("com2us_id")
-        if com2us_id is None:
-            raise ValueError("com2us_id is required")
+        from ..swarfarm.hashing import canonicalize_json, compute_hash
         
-        # 필수 스탯이 모두 None이면 스킵 (Crystal 등)
-        base_hp = monster_data.get("base_hp")
-        base_attack = monster_data.get("base_attack")
-        base_defense = monster_data.get("base_defense")
-        if base_hp is None and base_attack is None and base_defense is None:
-            raise ValueError(f"Monster {com2us_id} has no base stats (likely a Crystal/object)")
+        # Canonical JSON and hash
+        canonical_json = canonicalize_json(payload)
+        payload_hash = compute_hash(payload)
         
-        # None 값을 기본값으로 처리
-        base_hp = base_hp if base_hp is not None else 0
-        base_attack = base_attack if base_attack is not None else 0
-        base_defense = base_defense if base_defense is not None else 0
-        speed = monster_data.get("speed") if monster_data.get("speed") is not None else 0
-        
-        # 기존 레코드 조회
-        existing = self.session.query(MonsterBase).filter(
-            MonsterBase.com2us_id == com2us_id
+        # Check existing
+        existing = self.session.query(SwarfarmRaw).filter(
+            SwarfarmRaw.endpoint == endpoint,
+            SwarfarmRaw.object_id == object_id
         ).first()
         
-        # skills 리스트를 JSON 문자열로 변환
-        skills = monster_data.get("skills", [])
-        skills_json = json.dumps(skills) if skills else None
+        is_insert = False
+        is_update = False
         
         if existing:
-            # 업데이트
-            existing.swarfarm_id = monster_data.get("id")
-            existing.name = monster_data.get("name", "")
-            existing.element = monster_data.get("element", "")
-            existing.archetype = monster_data.get("archetype")
-            existing.base_hp = base_hp
-            existing.base_attack = base_attack
-            existing.base_defense = base_defense
-            existing.speed = speed
-            existing.crit_rate = monster_data.get("crit_rate") if monster_data.get("crit_rate") is not None else 15.0
-            existing.crit_damage = monster_data.get("crit_damage") if monster_data.get("crit_damage") is not None else 50.0
-            existing.resistance = monster_data.get("resistance") if monster_data.get("resistance") is not None else 0.0
-            existing.accuracy = monster_data.get("accuracy") if monster_data.get("accuracy") is not None else 0.0
-            existing.base_stars = monster_data.get("base_stars")
-            existing.natural_stars = monster_data.get("natural_stars", 0)
-            existing.awaken_level = monster_data.get("awaken_level", 0)
-            existing.family_id = monster_data.get("family_id")
-            existing.skill_group_id = monster_data.get("skill_group_id")
-            existing.skills_json = skills_json
-            existing.updated_at_local = datetime.utcnow()
-            
-            return existing
+            if existing.payload_hash != payload_hash:
+                # Update
+                existing.payload_json = canonical_json
+                existing.payload_hash = payload_hash
+                existing.source_url = source_url
+                existing.fetched_at = datetime.utcnow()
+                if com2us_id is not None:
+                    existing.com2us_id = com2us_id
+                
+                is_update = True
+                old_hash = existing.payload_hash
+            else:
+                # Unchanged
+                old_hash = existing.payload_hash
         else:
-            # 새로 생성
-            new_monster = MonsterBase(
+            # Insert
+            new_raw = SwarfarmRaw(
+                endpoint=endpoint,
+                object_id=object_id,
                 com2us_id=com2us_id,
-                swarfarm_id=monster_data.get("id"),
-                name=monster_data.get("name", ""),
-                element=monster_data.get("element", ""),
-                archetype=monster_data.get("archetype"),
-                base_hp=base_hp,
-                base_attack=base_attack,
-                base_defense=base_defense,
-                speed=speed,
-                crit_rate=monster_data.get("crit_rate") if monster_data.get("crit_rate") is not None else 15.0,
-                crit_damage=monster_data.get("crit_damage") if monster_data.get("crit_damage") is not None else 50.0,
-                resistance=monster_data.get("resistance") if monster_data.get("resistance") is not None else 0.0,
-                accuracy=monster_data.get("accuracy") if monster_data.get("accuracy") is not None else 0.0,
-                base_stars=monster_data.get("base_stars"),
-                natural_stars=monster_data.get("natural_stars", 0),
-                awaken_level=monster_data.get("awaken_level", 0),
-                family_id=monster_data.get("family_id"),
-                skill_group_id=monster_data.get("skill_group_id"),
-                skills_json=skills_json,
+                payload_json=canonical_json,
+                payload_hash=payload_hash,
+                source_url=source_url,
+                fetched_at=datetime.utcnow(),
             )
-            self.session.add(new_monster)
-            return new_monster
+            self.session.add(new_raw)
+            is_insert = True
+            old_hash = None
+        
+        # Change log
+        if enable_changelog and (is_insert or is_update):
+            change_type = "insert" if is_insert else "update"
+            change_log = SwarfarmChangeLog(
+                endpoint=endpoint,
+                object_id=object_id,
+                change_type=change_type,
+                old_hash=old_hash,
+                new_hash=payload_hash,
+                changed_at=datetime.utcnow(),
+            )
+            self.session.add(change_log)
+        
+        return payload_hash, is_insert, is_update
     
-    def get_by_com2us_id(self, com2us_id: int) -> Optional[MonsterBase]:
-        """com2us_id로 몬스터 조회"""
-        return self.session.query(MonsterBase).filter(
-            MonsterBase.com2us_id == com2us_id
+    def get_sync_state(self, endpoint: str) -> Optional[SwarfarmSyncState]:
+        """Get sync state for endpoint"""
+        return self.session.query(SwarfarmSyncState).filter(
+            SwarfarmSyncState.endpoint == endpoint
         ).first()
     
+    def upsert_sync_state(
+        self,
+        endpoint: str,
+        list_url: str,
+        etag: Optional[str] = None,
+        last_modified: Optional[str] = None,
+        last_count: Optional[int] = None,
+        last_error: Optional[str] = None,
+        success: bool = True,
+    ):
+        """Update sync state"""
+        state = self.get_sync_state(endpoint)
+        
+        if state:
+            state.list_url = list_url
+            if etag is not None:
+                state.etag = etag
+            if last_modified is not None:
+                state.last_modified = last_modified
+            if last_count is not None:
+                state.last_count = last_count
+            if last_error is not None:
+                state.last_error = last_error
+            elif success:
+                state.last_error = None
+            state.last_run_at = datetime.utcnow()
+            if success:
+                state.last_success_at = datetime.utcnow()
+        else:
+            state = SwarfarmSyncState(
+                endpoint=endpoint,
+                list_url=list_url,
+                etag=etag,
+                last_modified=last_modified,
+                last_count=last_count,
+                last_error=last_error,
+                last_run_at=datetime.utcnow(),
+                last_success_at=datetime.utcnow() if success else None,
+            )
+            self.session.add(state)
+    
+    def create_snapshot(self) -> SwarfarmSnapshot:
+        """Create new snapshot"""
+        snapshot = SwarfarmSnapshot(
+            started_at=datetime.utcnow(),
+            endpoints_total=0,
+            endpoints_changed=0,
+            endpoints_304=0,
+            objects_inserted=0,
+            objects_updated=0,
+            objects_unchanged=0,
+            errors_total=0,
+        )
+        self.session.add(snapshot)
+        return snapshot
+    
+    def update_snapshot(
+        self,
+        snapshot: SwarfarmSnapshot,
+        summary: Dict[str, Any],
+    ):
+        """Update snapshot with final stats"""
+        snapshot.finished_at = datetime.utcnow()
+        snapshot.endpoints_total = summary.get("endpoints_total", 0)
+        snapshot.endpoints_changed = summary.get("endpoints_changed", 0)
+        snapshot.endpoints_304 = summary.get("endpoints_304", 0)
+        snapshot.objects_inserted = summary.get("objects_inserted", 0)
+        snapshot.objects_updated = summary.get("objects_updated", 0)
+        snapshot.objects_unchanged = summary.get("objects_unchanged", 0)
+        snapshot.errors_total = summary.get("errors_total", 0)
+        snapshot.summary_json = json.dumps(summary)
+    
     def commit(self):
-        """변경사항 커밋"""
+        """Commit changes"""
         self.session.commit()
     
+    def rollback(self):
+        """Rollback changes"""
+        self.session.rollback()
+    
     def close(self):
-        """세션 종료 (자체 세션인 경우만)"""
+        """Close session (if own session)"""
         if self._own_session:
             self.session.close()
+    
+    @staticmethod
+    def create_tables(db_url: str = None):
+        """Create tables"""
+        engine = get_engine(db_url)
+        Base.metadata.create_all(engine)
     
     def __enter__(self):
         return self
@@ -130,12 +206,5 @@ class MonsterRepository:
         if exc_type is None:
             self.commit()
         else:
-            self.session.rollback()
+            self.rollback()
         self.close()
-    
-    @staticmethod
-    def create_tables(db_url: str = None):
-        """테이블 생성"""
-        engine = get_engine(db_url)
-        Base.metadata.create_all(engine)
-

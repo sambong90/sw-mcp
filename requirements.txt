@@ -26,3 +26,7 @@ httpx>=0.25.0
 black>=23.0.0
 flake8>=6.0.0
 
+# SWARFARM ingestion
+apscheduler>=3.10.0
+pytz>=2023.3
+
