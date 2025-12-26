@@ -2,7 +2,10 @@
 
 import pytest
 import json
-from src.sw_mcp.rules.schema import Ruleset, Metadata, Source, RuneRules, SetRules, SetBonus
+from src.sw_mcp.rules.schema import (
+    Ruleset, Metadata, Source, RuneRules, SetRules, SetBonus,
+    GemGrindRules, SubstatsRules, ContentRules
+)
 
 
 def test_ruleset_schema_validation():

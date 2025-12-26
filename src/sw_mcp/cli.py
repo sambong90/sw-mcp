@@ -142,7 +142,7 @@ def cmd_ruleset_validate(args):
         db_url = args.db_url or os.getenv("SW_MCP_DB_URL", DB_URL)
         repo = SwarfarmRepository()
         try:
-            from ..rules.loader import load_ruleset_from_db
+            from .rules.loader import load_ruleset_from_db
             ruleset = load_ruleset_from_db(repo, version_tag=args.version)
             if ruleset:
                 print(f"Ruleset {ruleset.version} is valid!")
