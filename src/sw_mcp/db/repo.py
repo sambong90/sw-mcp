@@ -188,6 +188,24 @@ class SwarfarmRepository:
         """Rollback changes"""
         self.session.rollback()
     
+    def set_current_ruleset(self, version_tag: str):
+        """Set current active ruleset"""
+        from .models import CurrentRuleset
+        current = self.session.query(CurrentRuleset).first()
+        if current:
+            current.version_tag = version_tag
+            current.updated_at = datetime.utcnow()
+        else:
+            current = CurrentRuleset(version_tag=version_tag)
+            self.session.add(current)
+        self.commit()
+    
+    def get_current_ruleset_version(self) -> Optional[str]:
+        """Get current active ruleset version tag"""
+        from .models import CurrentRuleset
+        current = self.session.query(CurrentRuleset).first()
+        return current.version_tag if current else None
+    
     def close(self):
         """Close session (if own session)"""
         if self._own_session:
