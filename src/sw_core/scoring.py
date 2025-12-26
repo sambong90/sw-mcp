@@ -54,6 +54,8 @@ def calculate_stats(runes: List[Rune],
                    base_spd: int = 104,
                    base_hp: int = 10000,
                    base_def: int = 500,
+                   base_cr: int = BASE_CR,
+                   base_cd: int = BASE_CD,
                    intangible_assignment: Dict[int, str] = None) -> Dict[str, float]:
     """
     범용 스탯 계산 (모든 스탯 포함)
@@ -72,10 +74,10 @@ def calculate_stats(runes: List[Rune],
     if intangible_assignment is None:
         intangible_assignment = {}
     
-    # 기본값
+    # 기본값 (레지스트리에서 제공된 base_cr/base_cd 사용)
     stats = {
-        "cr_total": BASE_CR,  # 기본 치확 15
-        "cd_total": BASE_CD,  # 기본 치피 50
+        "cr_total": base_cr,  # 레지스트리 기본값 또는 15
+        "cd_total": base_cd,  # 레지스트리 기본값 또는 50
         "atk_pct_total": 0.0,
         "atk_flat_total": 0.0,
         "hp_pct_total": 0.0,
@@ -305,7 +307,7 @@ def score_build(runes: List[Rune],
             # 배치 옵션 평가
             for assignment in ["to_Rage", "to_Fatal", "to_Blade", "none"]:
                 test_assignment = {intangible_rune.rune_id: assignment}
-                stats = calculate_stats(runes, base_atk, base_spd, base_hp, base_def, test_assignment)
+                stats = calculate_stats(runes, base_atk, base_spd, base_hp, base_def, base_cr, base_cd, test_assignment)
                 
                 # 세트 제약조건 확인
                 if set_constraints:
@@ -350,7 +352,7 @@ def score_build(runes: List[Rune],
                     best_intangible_assignment = test_assignment
     else:
         # 무형 룬이 없거나 set_constraints가 없으면 일반 계산
-        stats = calculate_stats(runes, base_atk, base_spd, base_hp, base_def, intangible_assignment)
+        stats = calculate_stats(runes, base_atk, base_spd, base_hp, base_def, base_cr, base_cd, intangible_assignment)
         best_stats = stats
         best_intangible_assignment = intangible_assignment
     

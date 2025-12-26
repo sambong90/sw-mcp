@@ -45,7 +45,7 @@ STAT_ID_NAME = {
     12: "ACC",
 }
 
-# 기본 스탯
+# 기본 스탯 (레지스트리에서 오버라이드 가능)
 BASE_CR = 15  # 기본 치명타 확률
 BASE_CD = 50  # 기본 치명타 데미지
 
@@ -113,3 +113,26 @@ class Rune:
         """특정 서브 스탯 존재 여부"""
         return self.get_sub_stat(stat_id) is not None
 
+
+@dataclass
+class MonsterBaseStats:
+    """몬스터 기본 스탯"""
+    master_id: int
+    name_ko: str
+    name_en: str
+    element: str
+    awakened: bool
+    nat_stars: int
+    base_hp: int
+    base_atk: int
+    base_def: int
+    base_spd: int
+    base_cr: int = BASE_CR  # 기본값 15
+    base_cd: int = BASE_CD  # 기본값 50
+    
+    def __post_init__(self):
+        """기본값 보정"""
+        if self.base_cr == 0:
+            self.base_cr = BASE_CR
+        if self.base_cd == 0:
+            self.base_cd = BASE_CD

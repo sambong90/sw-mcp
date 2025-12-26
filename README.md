@@ -102,6 +102,43 @@ alembic upgrade head
 docker-compose up api
 ```
 
+## 몬스터 데이터팩
+
+### 초기 설정
+
+1. **CSV 데이터팩 로드 (DB에 seed)**
+   ```bash
+   python -m src.sw_api.manage seed-monsters data/monsters_v1.csv
+   ```
+
+2. **DB에서 CSV로 export**
+   ```bash
+   python -m src.sw_api.manage export-monsters output.csv
+   ```
+
+### 데이터 소스 우선순위
+
+1. **DB (운영 기본)**: `sqlite:///sw_mcp.db` 또는 설정된 DB
+2. **CSV 데이터팩**: `data/monsters*.csv` (버전 관리)
+3. **원격 공급자**: 추후 구현 예정
+
+### 레지스트리 사용
+
+```python
+from src.sw_core.monster_registry import get_registry
+
+# 레지스트리 초기화
+registry = get_registry(data_dirs=["data"])
+
+# master_id로 조회
+stats = registry.get(master_id=14105)  # 루쉔
+print(f"ATK: {stats.base_atk}, SPD: {stats.base_spd}")
+
+# 이름으로 조회 (대소문자/공백 무시)
+stats = registry.get(name="Lushen")
+stats = registry.get(name="루쉔")
+```
+
 ## 사용법
 
 ### 기본 API (run_search)
@@ -132,44 +169,60 @@ from src.sw_core.swex_parser import load_swex_json
 
 runes = load_swex_json("swex_export.json")
 
-# 예시 1: 루쉔 (공격형)
+# 예시 1: 몬스터 레지스트리 사용 (권장)
+result = run_search(
+    runes=runes,
+    monster={"master_id": 14105},  # 루쉔 (base stats 자동 조회)
+    constraints={"CR": 100, "SPD": 100, "ATK_TOTAL": 2000},
+    set_constraints={"Fatal": 4, "Blade": 2},
+    objective="SCORE",
+    mode="exhaustive",
+    top_n=20
+)
+
+# 이름으로도 조회 가능
+result = run_search(
+    runes=runes,
+    monster={"name": "Lushen"},  # 또는 {"name": "루쉔"}
+    constraints={"CR": 100}
+)
+
+# 예시 2: 수동 base stats 지정 (레거시 호환)
 result = run_search(
     runes=runes,
     base_atk=900,
     base_spd=104,
     constraints={"CR": 100, "SPD": 100, "ATK_TOTAL": 2000},
-    set_constraints={"Fatal": 4, "Blade": 2},  # 맹공+칼날
+    set_constraints={"Fatal": 4, "Blade": 2},
     objective="SCORE",
-    mode="exhaustive",  # 정확도 100% 보장
+    mode="exhaustive",
     top_n=20
 )
 
-# 예시 2: 모든 세트 허용 (SWOP-like)
+# 예시 3: 모든 세트 허용 (SWOP-like)
 result = run_search(
     runes=runes,
-    base_atk=900,
-    base_spd=104,
+    monster={"master_id": 14105},
     constraints={"CR": 100, "SPD": 100},
     set_constraints=None,  # 모든 세트 허용
     objective="SCORE",
     mode="exhaustive"
 )
 
-# 예시 3: 탱커 (체력/방어 중심)
+# 예시 4: 탱커 (체력/방어 중심)
 result = run_search(
     runes=runes,
-    base_hp=15000,
-    base_def=800,
+    monster={"name": "베라드"},  # 또는 master_id 사용
     constraints={"HP_TOTAL": 30000, "DEF_TOTAL": 1500},
-    set_constraints={"Energy": 2, "Guard": 2},  # 에너지+가드
-    objective="EHP",  # Effective HP
+    set_constraints={"Energy": 2, "Guard": 2},
+    objective="EHP",
     mode="exhaustive"
 )
 
-# 예시 4: 모든 조건 만족 빌드 반환
+# 예시 5: 모든 조건 만족 빌드 반환
 result = run_search(
     runes=runes,
-    base_atk=900,
+    monster={"master_id": 14105},
     constraints={"CR": 100, "SPD": 100},
     return_all=True  # 모든 빌드 반환 (메모리 주의)
 )
