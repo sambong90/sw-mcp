@@ -25,7 +25,8 @@ def temp_db():
 
 def test_upsert_raw_insert(temp_db):
     """Test insert"""
-    repo = SwarfarmRepository()
+    from src.sw_mcp.db.engine import get_session
+    repo = SwarfarmRepository(session=get_session(temp_db))
     
     payload = {"id": 1, "name": "Test", "value": 100}
     hash_val, is_insert, is_update = repo.upsert_raw(
