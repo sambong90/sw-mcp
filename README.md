@@ -148,6 +148,69 @@ stats = registry.get(name="Lushen")
 stats = registry.get(name="루쉔")
 ```
 
+## 범용 룬 빌드 엔진 (Generic Optimizer)
+
+### 핵심 개선사항
+
+1. **모든 룬 세트 지원**
+   - Stat-affecting sets: Energy, Guard, Swift, Blade, Rage, Focus, Endure, Fatal, Fight, Determination, Enhance, Accuracy, Tolerance
+   - Proc sets: Violent, Will, Despair, Vampire, Nemesis, Shield, Revenge, Destroy (메타데이터만 저장, 스탯 영향 없음)
+   - 데이터 기반 세트 보너스 시스템 (`set_bonuses.py`)
+
+2. **다중 Intangible 룬 지원**
+   - 여러 개의 Intangible 룬을 안전하게 처리
+   - Brute-force assignment로 최적 배치 탐색
+   - 모든 세트에 배치 가능 (wildcard)
+
+3. **Exhaustive 모드 정확도 100% 보장**
+   - Heuristic candidate trimming 금지
+   - Upper-bound pruning 비활성화 (정확한 상한 계산 어려움)
+   - Feasibility pruning만 사용 (누락 없음)
+   - 테스트로 검증: brute force와 결과 일치
+
+4. **슬롯 메인 스탯 제약 정확성**
+   - Slot 1: ATK flat만 가능
+   - Slot 3: DEF flat만 가능
+   - Slot 5: HP flat만 가능
+   - Slot 2/4/6: 특정 스탯 금지 (강제 고정 없음)
+
+5. **DB 증분 업데이트 강화**
+   - Hash 기반 변경 감지 (SHA256)
+   - ETag/Last-Modified로 304 Not Modified 활용
+   - 일일 스케줄러 (APScheduler) 지원
+   - 상세 로깅: inserted/updated/unchanged per endpoint
+
+6. **최소 UI (Streamlit)**
+   - SWEX JSON 업로드
+   - 몬스터 선택 (레지스트리 또는 수동)
+   - 제약 조건 설정
+   - 세트 제약 설정
+   - 결과 테이블 및 상세 보기
+   - CSV 내보내기
+
+### 사용법
+
+```python
+from src.sw_core.api import run_search
+
+# 모든 세트 지원
+result = run_search(
+    runes,
+    monster={"name": "Lushen"},  # 또는 {"master_id": 14105}
+    constraints={"SPD": 100, "CR": 100, "ATK_TOTAL": 2000},
+    set_constraints={"Rage": 4, "Blade": 2},  # 선택사항
+    objective="SCORE",
+    mode="exhaustive",  # 정확도 100% 보장
+    top_n=20
+)
+```
+
+### UI 실행
+
+```bash
+streamlit run ui/app.py
+```
+
 ## Rules-as-Data 시스템
 
 게임 룰을 구조화된 데이터로 표현하고 버전 관리하는 시스템입니다.

@@ -4,6 +4,15 @@ from typing import List, Optional
 from .types import Rune, STAT_ID_NAME
 
 # 게임 룰: 슬롯별 메인스탯 제약 (하드 제약)
+# Slot 1: 메인은 ATK flat만 가능 (stat_id=3)
+SLOT_1_ALLOWED_MAIN = {3}  # ATK flat only
+
+# Slot 3: 메인은 DEF flat만 가능 (stat_id=5)
+SLOT_3_ALLOWED_MAIN = {5}  # DEF flat only
+
+# Slot 5: 메인은 HP flat만 가능 (stat_id=1)
+SLOT_5_ALLOWED_MAIN = {1}  # HP flat only
+
 # Slot 2: 메인에서 CD/CR/RES/ACC 선택 불가
 SLOT_2_FORBIDDEN_MAIN = {10, 9, 11, 12}  # CD, CR, RES, ACC
 
@@ -29,14 +38,21 @@ def slot_main_is_allowed(slot: int, main_stat_id: int) -> bool:
     Returns:
         허용되면 True, 금지되면 False
     """
-    if slot == 2:
+    # Slot 1, 3, 5: 특정 메인만 허용
+    if slot == 1:
+        return main_stat_id in SLOT_1_ALLOWED_MAIN
+    elif slot == 3:
+        return main_stat_id in SLOT_3_ALLOWED_MAIN
+    elif slot == 5:
+        return main_stat_id in SLOT_5_ALLOWED_MAIN
+    # Slot 2, 4, 6: 특정 메인 금지
+    elif slot == 2:
         return main_stat_id not in SLOT_2_FORBIDDEN_MAIN
     elif slot == 4:
         return main_stat_id not in SLOT_4_FORBIDDEN_MAIN
     elif slot == 6:
         return main_stat_id not in SLOT_6_FORBIDDEN_MAIN
     else:
-        # Slot 1, 3, 5는 메인스탯 제한 없음
         return True
 
 

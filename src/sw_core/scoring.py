@@ -1,83 +1,175 @@
-"""범용 빌드 스코어링"""
+"""Generic stat calculation for ALL rune sets"""
 
-from typing import List, Tuple, Dict, Callable
+from typing import List, Tuple, Dict, Callable, Optional
 from .types import Rune, BASE_CR, BASE_CD, STAT_ID_NAME, SET_ID_NAME
-from .types import RAGE_4SET_CD, FATAL_4SET_ATK_PCT, BLADE_2SET_CR
-
-# 세트 보너스 매핑
-SET_BONUSES = {
-    5: {4: 40},  # Rage 4세트: CD +40
-    8: {4: 35},  # Fatal 4세트: ATK% +35
-    4: {2: 12},  # Blade 2세트: CR +12
-}
+from .set_bonuses import SET_BONUS_DEFINITIONS, get_set_bonus_definition, load_set_bonuses_from_ruleset, SetBonusDefinition
 
 
-def count_sets(runes: List[Rune], intangible_assignment: Dict[int, str] = None) -> Dict[int, int]:
+def count_sets(runes: List[Rune], intangible_assignment: Dict[int, int] = None) -> Dict[int, int]:
     """
-    세트 개수 계산 (범용)
+    Count sets (supports multiple intangible runes)
     
     Args:
-        runes: 룬 리스트
-        intangible_assignment: 무형 룬 배치 {rune_id: "to_Rage"/"to_Fatal"/"to_Blade"/"none"}
+        runes: List of runes
+        intangible_assignment: {rune_id: target_set_id} for intangible runes
     
     Returns:
-        {set_id: count} 딕셔너리
+        {set_id: count} dictionary
     """
     if intangible_assignment is None:
         intangible_assignment = {}
     
     set_counts = {}
-    intangible_rune_ids = {r.rune_id for r in runes if r.intangible}
     
     for rune in runes:
         if rune.intangible:
-            # 무형 룬은 배치에 따라 세트에 추가
-            assignment = intangible_assignment.get(rune.rune_id, "none")
-            if assignment == "to_Rage":
-                set_id = 5
-            elif assignment == "to_Fatal":
-                set_id = 8
-            elif assignment == "to_Blade":
-                set_id = 4
-            else:
-                continue  # "none"이면 세트에 추가 안 함
+            # Intangible rune: assign to target set if specified
+            target_set_id = intangible_assignment.get(rune.rune_id)
+            if target_set_id is not None:
+                set_counts[target_set_id] = set_counts.get(target_set_id, 0) + 1
+            # If not assigned, it doesn't contribute to any set
         else:
-            set_id = rune.set_id
-        
-        set_counts[set_id] = set_counts.get(set_id, 0) + 1
+            set_counts[rune.set_id] = set_counts.get(rune.set_id, 0) + 1
     
     return set_counts
 
 
-def calculate_stats(runes: List[Rune], 
-                   base_atk: int = 900,
-                   base_spd: int = 104,
-                   base_hp: int = 10000,
-                   base_def: int = 500,
-                   base_cr: int = BASE_CR,
-                   base_cd: int = BASE_CD,
-                   intangible_assignment: Dict[int, str] = None) -> Dict[str, float]:
+def apply_set_bonuses(
+    base_stats: Dict[str, float],
+    rune_stats: Dict[str, float],
+    set_counts: Dict[int, int],
+    set_bonus_defs: Optional[Dict[int, SetBonusDefinition]] = None
+) -> Dict[str, float]:
     """
-    범용 스탯 계산 (모든 스탯 포함)
+    Apply set bonuses to stats (data-driven, supports ALL sets)
     
     Args:
-        runes: 룬 리스트
-        base_atk: 기본 공격력
-        base_spd: 기본 속도
-        base_hp: 기본 체력
-        base_def: 기본 방어력
-        intangible_assignment: 무형 룬 배치
+        base_stats: Base stats {base_atk, base_spd, base_hp, base_def}
+        rune_stats: Stats from runes {atk_pct_total, atk_flat_total, spd_total, ...}
+        set_counts: {set_id: count} from count_sets()
+        set_bonus_defs: Optional set bonus definitions (defaults to SET_BONUS_DEFINITIONS)
     
     Returns:
-        모든 스탯을 포함한 딕셔너리
+        Final derived stats
+    """
+    if set_bonus_defs is None:
+        set_bonus_defs = SET_BONUS_DEFINITIONS
+    
+    # Start with rune stats
+    final_stats = rune_stats.copy()
+    
+    # Apply stat-affecting set bonuses
+    for set_id, count in set_counts.items():
+        bonus_def = set_bonus_defs.get(set_id)
+        if bonus_def is None or bonus_def.is_proc_set:
+            continue  # Skip proc sets and unknown sets
+        
+        # Apply 2-set bonus
+        if count >= 2 and bonus_def.bonus_2:
+            for stat_name, value in bonus_def.bonus_2.items():
+                if stat_name == "HP_PCT":
+                    final_stats["hp_pct_total"] = final_stats.get("hp_pct_total", 0.0) + value
+                elif stat_name == "ATK_PCT":
+                    final_stats["atk_pct_total"] = final_stats.get("atk_pct_total", 0.0) + value
+                elif stat_name == "DEF_PCT":
+                    final_stats["def_pct_total"] = final_stats.get("def_pct_total", 0.0) + value
+                elif stat_name == "SPD_PCT":
+                    # Swift: applies to base SPD only
+                    final_stats["spd_pct_from_swift"] = value
+                elif stat_name == "CR":
+                    final_stats["cr_total"] = final_stats.get("cr_total", 0.0) + value
+                elif stat_name == "CD":
+                    final_stats["cd_total"] = final_stats.get("cd_total", 0.0) + value
+                elif stat_name == "ACC":
+                    final_stats["acc_total"] = final_stats.get("acc_total", 0.0) + value
+                elif stat_name == "RES":
+                    final_stats["res_total"] = final_stats.get("res_total", 0.0) + value
+        
+        # Apply 4-set bonus
+        if count >= 4 and bonus_def.bonus_4:
+            for stat_name, value in bonus_def.bonus_4.items():
+                if stat_name == "HP_PCT":
+                    final_stats["hp_pct_total"] = final_stats.get("hp_pct_total", 0.0) + value
+                elif stat_name == "ATK_PCT":
+                    final_stats["atk_pct_total"] = final_stats.get("atk_pct_total", 0.0) + value
+                elif stat_name == "DEF_PCT":
+                    final_stats["def_pct_total"] = final_stats.get("def_pct_total", 0.0) + value
+                elif stat_name == "CD":
+                    final_stats["cd_total"] = final_stats.get("cd_total", 0.0) + value
+    
+    # Calculate final totals with rounding (deterministic integer math)
+    base_atk = base_stats.get("base_atk", 900)
+    base_spd = base_stats.get("base_spd", 104)
+    base_hp = base_stats.get("base_hp", 10000)
+    base_def = base_stats.get("base_def", 500)
+    
+    # HP: base * (1 + pct_total/100) + flat_total (round down)
+    hp_pct = final_stats.get("hp_pct_total", 0.0)
+    hp_flat = final_stats.get("hp_flat_total", 0.0)
+    hp_bonus = int(base_hp * (hp_pct / 100.0)) + int(hp_flat)
+    final_stats["hp_total"] = base_hp + hp_bonus
+    final_stats["hp_bonus"] = hp_bonus
+    
+    # ATK: base * (1 + pct_total/100) + flat_total (round down)
+    atk_pct = final_stats.get("atk_pct_total", 0.0)
+    atk_flat = final_stats.get("atk_flat_total", 0.0)
+    atk_bonus = int(base_atk * (atk_pct / 100.0)) + int(atk_flat)
+    final_stats["atk_total"] = base_atk + atk_bonus
+    final_stats["atk_bonus"] = atk_bonus
+    
+    # DEF: base * (1 + pct_total/100) + flat_total (round down)
+    def_pct = final_stats.get("def_pct_total", 0.0)
+    def_flat = final_stats.get("def_flat_total", 0.0)
+    def_bonus = int(base_def * (def_pct / 100.0)) + int(def_flat)
+    final_stats["def_total"] = base_def + def_bonus
+    final_stats["def_bonus"] = def_bonus
+    
+    # SPD: base_spd * (1 + swift_pct_if_any/100) + flat_spd (round down)
+    spd_flat = final_stats.get("spd_total", 0.0)
+    swift_pct = final_stats.get("spd_pct_from_swift", 0.0)
+    spd_bonus = int(base_spd * (swift_pct / 100.0)) + int(spd_flat)
+    final_stats["spd_total"] = base_spd + spd_bonus
+    
+    # CR/CD/ACC/RES are additive (already in final_stats)
+    
+    return final_stats
+
+
+def calculate_stats(
+    runes: List[Rune],
+    base_atk: int = 900,
+    base_spd: int = 104,
+    base_hp: int = 10000,
+    base_def: int = 500,
+    base_cr: int = BASE_CR,
+    base_cd: int = BASE_CD,
+    intangible_assignment: Dict[int, int] = None,
+    set_bonus_defs: Optional[Dict[int, SetBonusDefinition]] = None
+) -> Dict[str, float]:
+    """
+    Calculate stats from runes (generic for ALL sets)
+    
+    Args:
+        runes: List of 6 runes
+        base_atk: Base attack
+        base_spd: Base speed
+        base_hp: Base HP
+        base_def: Base defense
+        base_cr: Base crit rate
+        base_cd: Base crit damage
+        intangible_assignment: {rune_id: target_set_id} for intangible runes
+        set_bonus_defs: Optional set bonus definitions
+    
+    Returns:
+        Complete stats dictionary
     """
     if intangible_assignment is None:
         intangible_assignment = {}
     
-    # 기본값 (레지스트리에서 제공된 base_cr/base_cd 사용)
-    stats = {
-        "cr_total": base_cr,  # 레지스트리 기본값 또는 15
-        "cd_total": base_cd,  # 레지스트리 기본값 또는 50
+    # Initialize stats from base values
+    rune_stats = {
+        "cr_total": float(base_cr),
+        "cd_total": float(base_cd),
         "atk_pct_total": 0.0,
         "atk_flat_total": 0.0,
         "hp_pct_total": 0.0,
@@ -89,140 +181,115 @@ def calculate_stats(runes: List[Rune],
         "acc_total": 0.0,
     }
     
-    # 룬 스탯 합산
+    # Sum stats from runes
     for rune in runes:
-        # 메인 스탯
+        # Main stat
         if rune.main_stat_id == 1:  # HP
-            stats["hp_flat_total"] += rune.main_stat_value
+            rune_stats["hp_flat_total"] += rune.main_stat_value
         elif rune.main_stat_id == 2:  # HP%
-            stats["hp_pct_total"] += rune.main_stat_value
+            rune_stats["hp_pct_total"] += rune.main_stat_value
         elif rune.main_stat_id == 3:  # ATK
-            stats["atk_flat_total"] += rune.main_stat_value
+            rune_stats["atk_flat_total"] += rune.main_stat_value
         elif rune.main_stat_id == 4:  # ATK%
-            stats["atk_pct_total"] += rune.main_stat_value
+            rune_stats["atk_pct_total"] += rune.main_stat_value
         elif rune.main_stat_id == 5:  # DEF
-            stats["def_flat_total"] += rune.main_stat_value
+            rune_stats["def_flat_total"] += rune.main_stat_value
         elif rune.main_stat_id == 6:  # DEF%
-            stats["def_pct_total"] += rune.main_stat_value
+            rune_stats["def_pct_total"] += rune.main_stat_value
         elif rune.main_stat_id == 8:  # SPD
-            stats["spd_total"] += rune.main_stat_value
+            rune_stats["spd_total"] += rune.main_stat_value
         elif rune.main_stat_id == 9:  # CR
-            stats["cr_total"] += rune.main_stat_value
+            rune_stats["cr_total"] += rune.main_stat_value
         elif rune.main_stat_id == 10:  # CD
-            stats["cd_total"] += rune.main_stat_value
+            rune_stats["cd_total"] += rune.main_stat_value
         elif rune.main_stat_id == 11:  # RES
-            stats["res_total"] += rune.main_stat_value
+            rune_stats["res_total"] += rune.main_stat_value
         elif rune.main_stat_id == 12:  # ACC
-            stats["acc_total"] += rune.main_stat_value
+            rune_stats["acc_total"] += rune.main_stat_value
         
-        # prefix_eff 합산
+        # Prefix
         if rune.has_prefix:
             if rune.prefix_stat_id == 1:
-                stats["hp_flat_total"] += rune.prefix_stat_value
+                rune_stats["hp_flat_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 2:
-                stats["hp_pct_total"] += rune.prefix_stat_value
+                rune_stats["hp_pct_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 3:
-                stats["atk_flat_total"] += rune.prefix_stat_value
+                rune_stats["atk_flat_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 4:
-                stats["atk_pct_total"] += rune.prefix_stat_value
+                rune_stats["atk_pct_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 5:
-                stats["def_flat_total"] += rune.prefix_stat_value
+                rune_stats["def_flat_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 6:
-                stats["def_pct_total"] += rune.prefix_stat_value
+                rune_stats["def_pct_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 8:
-                stats["spd_total"] += rune.prefix_stat_value
+                rune_stats["spd_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 9:
-                stats["cr_total"] += rune.prefix_stat_value
+                rune_stats["cr_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 10:
-                stats["cd_total"] += rune.prefix_stat_value
+                rune_stats["cd_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 11:
-                stats["res_total"] += rune.prefix_stat_value
+                rune_stats["res_total"] += rune.prefix_stat_value
             elif rune.prefix_stat_id == 12:
-                stats["acc_total"] += rune.prefix_stat_value
+                rune_stats["acc_total"] += rune.prefix_stat_value
         
-        # 서브 스탯
+        # Substats
         for sub in rune.subs:
             if sub.stat_id == 1:
-                stats["hp_flat_total"] += sub.value
+                rune_stats["hp_flat_total"] += sub.value
             elif sub.stat_id == 2:
-                stats["hp_pct_total"] += sub.value
+                rune_stats["hp_pct_total"] += sub.value
             elif sub.stat_id == 3:
-                stats["atk_flat_total"] += sub.value
+                rune_stats["atk_flat_total"] += sub.value
             elif sub.stat_id == 4:
-                stats["atk_pct_total"] += sub.value
+                rune_stats["atk_pct_total"] += sub.value
             elif sub.stat_id == 5:
-                stats["def_flat_total"] += sub.value
+                rune_stats["def_flat_total"] += sub.value
             elif sub.stat_id == 6:
-                stats["def_pct_total"] += sub.value
+                rune_stats["def_pct_total"] += sub.value
             elif sub.stat_id == 8:
-                stats["spd_total"] += sub.value
+                rune_stats["spd_total"] += sub.value
             elif sub.stat_id == 9:
-                stats["cr_total"] += sub.value
+                rune_stats["cr_total"] += sub.value
             elif sub.stat_id == 10:
-                stats["cd_total"] += sub.value
+                rune_stats["cd_total"] += sub.value
             elif sub.stat_id == 11:
-                stats["res_total"] += sub.value
+                rune_stats["res_total"] += sub.value
             elif sub.stat_id == 12:
-                stats["acc_total"] += sub.value
+                rune_stats["acc_total"] += sub.value
     
-    # 세트 보너스 계산
+    # Count sets
     set_counts = count_sets(runes, intangible_assignment)
-    for set_id, count in set_counts.items():
-        if set_id in SET_BONUSES:
-            bonuses = SET_BONUSES[set_id]
-            for threshold, bonus in bonuses.items():
-                if count >= threshold:
-                    if set_id == 5:  # Rage 4세트: CD +40
-                        stats["cd_total"] += bonus
-                    elif set_id == 8:  # Fatal 4세트: ATK% +35
-                        stats["atk_pct_total"] += bonus
-                    elif set_id == 4:  # Blade 2세트: CR +12
-                        stats["cr_total"] += bonus
     
-    # 총합 계산
-    atk_bonus = round(base_atk * (stats["atk_pct_total"] / 100.0) + stats["atk_flat_total"])
-    stats["atk_total"] = base_atk + atk_bonus
-    stats["atk_bonus"] = atk_bonus
+    # Apply set bonuses
+    base_stats = {
+        "base_atk": base_atk,
+        "base_spd": base_spd,
+        "base_hp": base_hp,
+        "base_def": base_def,
+    }
     
-    hp_bonus = round(base_hp * (stats["hp_pct_total"] / 100.0) + stats["hp_flat_total"])
-    stats["hp_total"] = base_hp + hp_bonus
-    stats["hp_bonus"] = hp_bonus
+    final_stats = apply_set_bonuses(base_stats, rune_stats, set_counts, set_bonus_defs)
     
-    def_bonus = round(base_def * (stats["def_pct_total"] / 100.0) + stats["def_flat_total"])
-    stats["def_total"] = base_def + def_bonus
-    stats["def_bonus"] = def_bonus
-    
-    stats["spd_total"] = base_spd + stats["spd_total"]
-    
-    return stats
+    return final_stats
 
 
-# Objective 함수들 (플러그인 형태)
+# Objective functions (pluggable)
 OBJECTIVE_FUNCTIONS: Dict[str, Callable[[Dict[str, float]], float]] = {}
 
 
 def register_objective(name: str, func: Callable[[Dict[str, float]], float]):
-    """Objective 함수 등록"""
+    """Register objective function"""
     OBJECTIVE_FUNCTIONS[name] = func
 
 
 def get_objective_value(objective: str, stats: Dict[str, float]) -> float:
-    """
-    Objective 값 계산
-    
-    Args:
-        objective: Objective 이름 ("SCORE", "ATK_TOTAL", "EHP", "SPD" 등)
-        stats: 스탯 딕셔너리
-    
-    Returns:
-        Objective 값
-    """
+    """Get objective value"""
     if objective in OBJECTIVE_FUNCTIONS:
         return OBJECTIVE_FUNCTIONS[objective](stats)
     
-    # 기본 objective들
+    # Default objectives
     if objective == "SCORE":
-        # 루쉔 스코어: (cd_total * 10) + atk_bonus + 200
+        # Generic score: (cd_total * 10) + atk_bonus + 200
         return (stats.get("cd_total", 0) * 10) + stats.get("atk_bonus", 0) + 200
     elif objective == "ATK_TOTAL":
         return stats.get("atk_total", 0)
@@ -244,38 +311,168 @@ def get_objective_value(objective: str, stats: Dict[str, float]) -> float:
         def_val = stats.get("def_total", 0)
         return hp * (1 + def_val / 1000.0)
     elif objective == "DAMAGE_PROXY":
-        # 대미지 프록시: ATK * (1 + CD/100) * (1 + CR/100)
+        # Damage proxy: ATK * (1 + CD/100) * (1 + CR/100)
         atk = stats.get("atk_total", 0)
         cd = stats.get("cd_total", 0)
-        cr = min(stats.get("cr_total", 0), 100.0)  # CR은 100% 제한
+        cr = min(stats.get("cr_total", 0), 100.0)
         return atk * (1 + cd / 100.0) * (1 + cr / 100.0)
     else:
-        # 기본값: SCORE
+        # Default: SCORE
         return (stats.get("cd_total", 0) * 10) + stats.get("atk_bonus", 0) + 200
 
 
-def score_build(runes: List[Rune],
-                objective: str = "SCORE",
-                base_atk: int = 900,
-                base_spd: int = 104,
-                base_hp: int = 10000,
-                base_def: int = 500,
-                constraints: Dict[str, float] = None,
-                set_constraints: Dict[str, int] = None,
-                intangible_assignment: Dict[int, str] = None) -> Tuple[float, Dict[str, float], Dict[int, str]]:
+def find_optimal_intangible_assignment(
+    runes: List[Rune],
+    base_stats: Dict[str, float],
+    constraints: Dict[str, float],
+    set_constraints: Dict[str, int],
+    objective: str,
+    set_bonus_defs: Optional[Dict[int, SetBonusDefinition]] = None
+) -> Tuple[Dict[int, int], Dict[str, float], float]:
     """
-    범용 빌드 스코어 계산
+    Find optimal assignment for multiple intangible runes
     
     Args:
-        runes: 룬 리스트
-        objective: 목표 함수 ("SCORE", "ATK_TOTAL", "EHP", "SPD" 등)
-        base_atk: 기본 공격력
-        base_spd: 기본 속도
-        base_hp: 기본 체력
-        base_def: 기본 방어력
-        constraints: 제약조건 ({"CR": 100, "SPD": 100} 등)
-        set_constraints: 세트 제약조건 ({"Rage": 4, "Blade": 2} 등)
-        intangible_assignment: 무형 룬 배치
+        runes: List of 6 runes (may contain multiple intangible)
+        base_stats: Base stats dict
+        constraints: Stat constraints
+        set_constraints: Set constraints {set_name: count}
+        objective: Objective function name
+        set_bonus_defs: Optional set bonus definitions
+    
+    Returns:
+        (best_assignment, best_stats, best_score)
+        best_assignment: {rune_id: target_set_id}
+    """
+    intangible_runes = [r for r in runes if r.intangible]
+    
+    if not intangible_runes:
+        # No intangible runes
+        stats = calculate_stats(
+            runes,
+            base_stats.get("base_atk", 900),
+            base_stats.get("base_spd", 104),
+            base_stats.get("base_hp", 10000),
+            base_stats.get("base_def", 500),
+            base_stats.get("base_cr", BASE_CR),
+            base_stats.get("base_cd", BASE_CD),
+            None,
+            set_bonus_defs
+        )
+        score = get_objective_value(objective, stats)
+        return {}, stats, score
+    
+    # Brute force: try all possible assignments
+    # Each intangible can be assigned to any set_id or None
+    # Limit to reasonable sets (1-25, excluding proc-only sets for assignment)
+    assignable_sets = [1, 2, 3, 4, 5, 6, 7, 8, 17, 18, 19, 20, 21]  # Stat-affecting sets
+    assignable_sets.append(None)  # "none" option
+    
+    best_assignment = {}
+    best_stats = {}
+    best_score = float('-inf')
+    
+    # Generate all combinations
+    from itertools import product
+    
+    num_intangible = len(intangible_runes)
+    for assignment_tuple in product(assignable_sets, repeat=num_intangible):
+        assignment = {
+            intangible_runes[i].rune_id: assignment_tuple[i]
+            for i in range(num_intangible)
+            if assignment_tuple[i] is not None
+        }
+        
+        # Calculate stats with this assignment
+        stats = calculate_stats(
+            runes,
+            base_stats.get("base_atk", 900),
+            base_stats.get("base_spd", 104),
+            base_stats.get("base_hp", 10000),
+            base_stats.get("base_def", 500),
+            base_stats.get("base_cr", BASE_CR),
+            base_stats.get("base_cd", BASE_CD),
+            assignment,
+            set_bonus_defs
+        )
+        
+        # Check set constraints
+        if set_constraints:
+            set_counts = count_sets(runes, assignment)
+            set_names = {SET_ID_NAME.get(sid, "Unknown"): cnt for sid, cnt in set_counts.items()}
+            valid = True
+            for set_name, required_count in set_constraints.items():
+                if set_names.get(set_name, 0) < required_count:
+                    valid = False
+                    break
+            if not valid:
+                continue
+        
+        # Check stat constraints
+        valid = True
+        for key, min_val in constraints.items():
+            key_upper = key.upper()
+            if key_upper == "CR" and stats.get("cr_total", 0) < min_val:
+                valid = False
+                break
+            elif key_upper == "CD" and stats.get("cd_total", 0) < min_val:
+                valid = False
+                break
+            elif key_upper == "SPD" and stats.get("spd_total", 0) < min_val:
+                valid = False
+                break
+            elif key_upper == "ATK_TOTAL" and stats.get("atk_total", 0) < min_val:
+                valid = False
+                break
+            elif key_upper == "HP_TOTAL" and stats.get("hp_total", 0) < min_val:
+                valid = False
+                break
+            elif key_upper == "DEF_TOTAL" and stats.get("def_total", 0) < min_val:
+                valid = False
+                break
+        if not valid:
+            continue
+        
+        # Calculate score
+        score = get_objective_value(objective, stats)
+        if score > best_score:
+            best_score = score
+            best_stats = stats
+            best_assignment = assignment
+    
+    return best_assignment, best_stats, best_score
+
+
+def score_build(
+    runes: List[Rune],
+    objective: str = "SCORE",
+    base_atk: int = 900,
+    base_spd: int = 104,
+    base_hp: int = 10000,
+    base_def: int = 500,
+    base_cr: int = BASE_CR,
+    base_cd: int = BASE_CD,
+    constraints: Dict[str, float] = None,
+    set_constraints: Dict[str, int] = None,
+    intangible_assignment: Dict[int, int] = None,
+    set_bonus_defs: Optional[Dict[int, SetBonusDefinition]] = None
+) -> Tuple[float, Dict[str, float], Dict[int, int]]:
+    """
+    Score a build (supports multiple intangible runes)
+    
+    Args:
+        runes: List of 6 runes
+        objective: Objective function name
+        base_atk: Base attack
+        base_spd: Base speed
+        base_hp: Base HP
+        base_def: Base defense
+        base_cr: Base crit rate
+        base_cd: Base crit damage
+        constraints: Stat constraints
+        set_constraints: Set constraints {set_name: count}
+        intangible_assignment: {rune_id: target_set_id} (if None, will optimize)
+        set_bonus_defs: Optional set bonus definitions
     
     Returns:
         (score, stats_dict, best_intangible_assignment)
@@ -287,101 +484,51 @@ def score_build(runes: List[Rune],
         constraints = {}
     if set_constraints is None:
         set_constraints = {}
+    
+    base_stats = {
+        "base_atk": base_atk,
+        "base_spd": base_spd,
+        "base_hp": base_hp,
+        "base_def": base_def,
+        "base_cr": base_cr,
+        "base_cd": base_cd,
+    }
+    
+    # Optimize intangible assignment if needed
     if intangible_assignment is None:
-        intangible_assignment = {}
-    
-    # 무형 룬 최대 1개만 허용
-    intangible_count = sum(1 for r in runes if r.intangible)
-    if intangible_count > 1:
-        return 0.0, {}, {}
-    
-    # 무형 룬 배치 최적화 (set_constraints가 있을 때만)
-    best_intangible_assignment = {}
-    if intangible_count > 0 and set_constraints:
-        best_score = 0.0
-        best_stats = {}
-        
-        # 무형 룬 ID 찾기
-        intangible_rune = next((r for r in runes if r.intangible), None)
-        if intangible_rune:
-            # 배치 옵션 평가
-            for assignment in ["to_Rage", "to_Fatal", "to_Blade", "none"]:
-                test_assignment = {intangible_rune.rune_id: assignment}
-                stats = calculate_stats(runes, base_atk, base_spd, base_hp, base_def, base_cr, base_cd, test_assignment)
-                
-                # 세트 제약조건 확인
-                if set_constraints:
-                    set_counts = count_sets(runes, test_assignment)
-                    set_names = {SET_ID_NAME.get(sid, "Unknown"): cnt for sid, cnt in set_counts.items()}
-                    valid = True
-                    for set_name, required_count in set_constraints.items():
-                        if set_names.get(set_name, 0) < required_count:
-                            valid = False
-                            break
-                    if not valid:
-                        continue
-                
-                # 제약조건 확인
-                valid = True
-                for key, min_val in constraints.items():
-                    if key.upper() == "CR" and stats.get("cr_total", 0) < min_val:
-                        valid = False
-                        break
-                    elif key.upper() == "CD" and stats.get("cd_total", 0) < min_val:
-                        valid = False
-                        break
-                    elif key.upper() == "SPD" and stats.get("spd_total", 0) < min_val:
-                        valid = False
-                        break
-                    elif key.upper() == "ATK_TOTAL" and stats.get("atk_total", 0) < min_val:
-                        valid = False
-                        break
-                    elif key.upper() == "HP_TOTAL" and stats.get("hp_total", 0) < min_val:
-                        valid = False
-                        break
-                    elif key.upper() == "DEF_TOTAL" and stats.get("def_total", 0) < min_val:
-                        valid = False
-                        break
-                if not valid:
-                    continue
-                
-                score = get_objective_value(objective, stats)
-                if score > best_score:
-                    best_score = score
-                    best_stats = stats
-                    best_intangible_assignment = test_assignment
+        intangible_assignment, stats, score = find_optimal_intangible_assignment(
+            runes, base_stats, constraints, set_constraints, objective, set_bonus_defs
+        )
     else:
-        # 무형 룬이 없거나 set_constraints가 없으면 일반 계산
-        stats = calculate_stats(runes, base_atk, base_spd, base_hp, base_def, base_cr, base_cd, intangible_assignment)
-        best_stats = stats
-        best_intangible_assignment = intangible_assignment
+        stats = calculate_stats(
+            runes, base_atk, base_spd, base_hp, base_def, base_cr, base_cd,
+            intangible_assignment, set_bonus_defs
+        )
+        score = get_objective_value(objective, stats)
     
-    # 세트 제약조건 확인
+    # Check set constraints
     if set_constraints:
-        set_counts = count_sets(runes, best_intangible_assignment)
+        set_counts = count_sets(runes, intangible_assignment)
         set_names = {SET_ID_NAME.get(sid, "Unknown"): cnt for sid, cnt in set_counts.items()}
         for set_name, required_count in set_constraints.items():
             if set_names.get(set_name, 0) < required_count:
-                return 0.0, best_stats, best_intangible_assignment
+                return 0.0, stats, intangible_assignment
     
-    # 제약조건 확인
+    # Check stat constraints
     for key, min_val in constraints.items():
         key_upper = key.upper()
-        if key_upper == "CR" and best_stats.get("cr_total", 0) < min_val:
-            return 0.0, best_stats, best_intangible_assignment
-        elif key_upper == "CD" and best_stats.get("cd_total", 0) < min_val:
-            return 0.0, best_stats, best_intangible_assignment
-        elif key_upper == "SPD" and best_stats.get("spd_total", 0) < min_val:
-            return 0.0, best_stats, best_intangible_assignment
-        elif key_upper == "ATK_TOTAL" and best_stats.get("atk_total", 0) < min_val:
-            return 0.0, best_stats, best_intangible_assignment
-        elif key_upper == "HP_TOTAL" and best_stats.get("hp_total", 0) < min_val:
-            return 0.0, best_stats, best_intangible_assignment
-        elif key_upper == "DEF_TOTAL" and best_stats.get("def_total", 0) < min_val:
-            return 0.0, best_stats, best_intangible_assignment
+        if key_upper == "CR" and stats.get("cr_total", 0) < min_val:
+            return 0.0, stats, intangible_assignment
+        elif key_upper == "CD" and stats.get("cd_total", 0) < min_val:
+            return 0.0, stats, intangible_assignment
+        elif key_upper == "SPD" and stats.get("spd_total", 0) < min_val:
+            return 0.0, stats, intangible_assignment
+        elif key_upper == "ATK_TOTAL" and stats.get("atk_total", 0) < min_val:
+            return 0.0, stats, intangible_assignment
+        elif key_upper == "HP_TOTAL" and stats.get("hp_total", 0) < min_val:
+            return 0.0, stats, intangible_assignment
+        elif key_upper == "DEF_TOTAL" and stats.get("def_total", 0) < min_val:
+            return 0.0, stats, intangible_assignment
     
-    # Objective 값 계산
-    score = get_objective_value(objective, best_stats)
-    best_stats["score"] = score
-    
-    return score, best_stats, best_intangible_assignment
+    stats["score"] = score
+    return score, stats, intangible_assignment

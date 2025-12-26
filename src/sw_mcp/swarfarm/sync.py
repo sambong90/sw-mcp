@@ -171,8 +171,11 @@ def sync_endpoint(
         )
         repo.commit()
         
-        if verbose:
-            print(f"  [OK] {endpoint_name}: {stats['inserted']} inserted, {stats['updated']} updated, {stats['unchanged']} unchanged, {stats['errors']} errors")
+            if verbose:
+                print(f"  [OK] {endpoint_name}: {stats['inserted']} inserted, {stats['updated']} updated, {stats['unchanged']} unchanged, {stats['errors']} errors")
+                # Log incremental update stats
+                if stats['inserted'] > 0 or stats['updated'] > 0:
+                    print(f"      -> Incremental: {stats['inserted']} new, {stats['updated']} changed (hash diff)")
     
     except Exception as e:
         stats["errors"] += 1

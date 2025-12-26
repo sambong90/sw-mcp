@@ -475,14 +475,17 @@ def search_builds(runes: List[Rune],
         if not slot_runes[slot]:
             return []
     
-    # exhaustive 모드: fast 모드에서만 후보 제한 적용
+    # exhaustive 모드: NO heuristic candidate trimming
+    # fast 모드에서만 후보 제한 적용
     if mode == "fast":
         # 슬롯별 후보 수가 많으면 상위 K개만 유지 (heuristic pruning)
+        # ⚠️ WARNING: This may miss valid builds - accuracy not guaranteed
         for slot in range(1, 7):
             if len(slot_runes[slot]) > max_candidates_per_slot:
                 # 휴리스틱 스코어로 정렬하여 상위 K개만 유지
                 slot_runes[slot].sort(key=lambda r: calculate_heuristic_score(DPState().add_rune(r), base_atk), reverse=True)
                 slot_runes[slot] = slot_runes[slot][:max_candidates_per_slot]
+    # exhaustive 모드에서는 모든 후보를 유지 (정확도 100% 보장)
     
     # 슬롯 탐색 순서 최적화: 후보 수가 적은 슬롯부터 (정확도 영향 없음)
     slot_order = sorted(range(1, 7), key=lambda s: len(slot_runes[s]))
@@ -522,8 +525,10 @@ def search_builds(runes: List[Rune],
         if mode == "fast" and len(results) >= max_results:
             return
         
-        # Upper-bound pruning (top_n 모드일 때만, exhaustive 모드에서도 사용)
-        if not return_all and top_n > 0 and len(results) >= top_n:
+        # Upper-bound pruning: DISABLED in exhaustive mode for correctness
+        # (Safe upper bounds are hard to compute with all set bonuses and intangible assignments)
+        # Only use in fast mode with top_n
+        if mode == "fast" and not return_all and top_n > 0 and len(results) >= top_n:
             upper_bound = calculate_upper_bound(state, current_slot)
             # 현재 결과의 최저 점수보다 상한이 낮으면 가지치기
             if len(results) >= top_n:
@@ -532,6 +537,7 @@ def search_builds(runes: List[Rune],
                 min_value = get_objective_value(objective, sorted_results[top_n - 1]["stats"])
                 
                 # upper_bound는 SCORE 기준이므로 objective가 SCORE일 때만 비교
+                # ⚠️ WARNING: This may miss valid builds if upper bound is not truly safe
                 if objective == "SCORE" and upper_bound < min_value:
                     return
         
