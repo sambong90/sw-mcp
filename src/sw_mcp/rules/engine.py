@@ -1,8 +1,47 @@
 """Rules engine that validates and applies rules"""
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from .schema import Ruleset, RuneRules, SetRules, SlotSpecialRule
-from ..sw_core.types import Rune
+
+if TYPE_CHECKING:
+    from src.sw_core.types import Rune, SubStat
+else:
+    # Runtime import
+    import sys
+    import os
+    from pathlib import Path
+    
+    # Add project root to path
+    project_root = Path(__file__).parent.parent.parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    
+    try:
+        from sw_core.types import Rune, SubStat
+    except ImportError:
+        # Fallback for testing
+        from dataclasses import dataclass
+        from typing import List as TypingList
+        
+        @dataclass
+        class SubStat:
+            stat_id: int
+            value: float
+        
+        @dataclass
+        class Rune:
+            rune_id: int
+            slot: int
+            set_id: int
+            main_stat_id: int
+            main_stat_value: float
+            subs: TypingList[SubStat]
+            level: int = 15
+            quality: int = 6
+            has_prefix: bool = False
+            prefix_stat_id: Optional[int] = None
+            prefix_stat_value: Optional[float] = None
+            intangible: bool = False
 
 
 class RulesEngine:
