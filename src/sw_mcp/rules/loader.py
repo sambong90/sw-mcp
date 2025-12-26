@@ -1,7 +1,7 @@
 """Ruleset loader from DB or file"""
 
 import json
-from typing import Optional
+from typing import Optional, Dict
 from pathlib import Path
 from .schema import Ruleset
 from ..db.repo import SwarfarmRepository
