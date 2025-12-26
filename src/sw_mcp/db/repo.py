@@ -58,6 +58,7 @@ class SwarfarmRepository:
         is_update = False
         
         if existing:
+            old_hash = existing.payload_hash
             if existing.payload_hash != payload_hash:
                 # Update
                 existing.payload_json = canonical_json
@@ -68,10 +69,9 @@ class SwarfarmRepository:
                     existing.com2us_id = com2us_id
                 
                 is_update = True
-                old_hash = existing.payload_hash
             else:
                 # Unchanged
-                old_hash = existing.payload_hash
+                pass
         else:
             # Insert
             new_raw = SwarfarmRaw(
