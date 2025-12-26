@@ -54,6 +54,15 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+### 환경변수 (선택)
+
+```bash
+# DB URL 설정 (기본값: sqlite:///sw_mcp.db)
+export SW_MCP_DB_URL="sqlite:///sw_mcp.db"
+# 또는 PostgreSQL
+export SW_MCP_DB_URL="postgresql://user:password@localhost/sw_mcp"
+```
+
 ### Docker Compose (프로덕션)
 
 ```bash
@@ -138,6 +147,62 @@ print(f"ATK: {stats.base_atk}, SPD: {stats.base_spd}")
 stats = registry.get(name="Lushen")
 stats = registry.get(name="루쉔")
 ```
+
+## SWARFARM 몬스터 기본 스탯 DB 동기화
+
+SWARFARM API를 통해 모든 몬스터의 기본 스탯을 DB에 저장하여, 룬 최적화 시 자동으로 사용할 수 있습니다.
+
+### 초기 동기화
+
+```bash
+# 전체 몬스터 데이터 동기화 (수천 개, 시간 소요)
+python -m src.sw_mcp.sync_swarfarm monsters
+
+# 옵션:
+# --db <DB_URL>: DB URL 지정 (기본값: 환경변수 SW_MCP_DB_URL 또는 sqlite:///sw_mcp.db)
+# --sleep-ms <ms>: 요청 간 슬립 시간 (기본값: 100ms, rate limit 방지)
+# --max-pages <N>: 최대 페이지 수 (디버그용)
+# --quiet: 상세 출력 비활성화
+
+# 예시:
+python -m src.sw_mcp.sync_swarfarm monsters --sleep-ms 200 --max-pages 5
+```
+
+### 동기화 결과
+
+- 모든 몬스터의 기본 스탯이 `monster_base` 테이블에 저장됩니다
+- `com2us_id` 기준으로 업서트되므로, 재실행 시 업데이트됩니다
+- 동기화 후 룬 최적화에서 몬스터 기본 스탯을 자동으로 사용할 수 있습니다
+
+### 몬스터 기본 스탯 조회
+
+```python
+from src.sw_mcp.monster_base import get_base_stats, get_base_stats_safe
+
+# com2us_id로 조회 (SWEX unit_master_id와 동일)
+stats = get_base_stats(14105)  # 루쉔
+if stats:
+    print(f"ATK: {stats['base_attack']}, SPD: {stats['speed']}")
+
+# Fallback 지원 (DB에 없으면 기본값 사용)
+stats = get_base_stats_safe(
+    14105,
+    fallback={"base_attack": 900, "speed": 104}
+)
+```
+
+### DB 스키마
+
+`monster_base` 테이블:
+- `com2us_id` (UNIQUE): SWEX unit_master_id 매칭 키
+- `swarfarm_id`: SWARFARM API의 id
+- `name`, `element`, `archetype`
+- `base_hp`, `base_attack`, `base_defense`, `speed`
+- `crit_rate`, `crit_damage`, `resistance`, `accuracy`
+- `base_stars`, `natural_stars`, `awaken_level`
+- `family_id`, `skill_group_id`
+- `skills_json`: 스킬 리스트 (JSON)
+- `updated_at_local`: 최종 업데이트 시각
 
 ## 사용법
 
