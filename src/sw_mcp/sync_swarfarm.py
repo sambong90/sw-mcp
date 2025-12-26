@@ -74,18 +74,41 @@ def sync_monsters(
                 
                 # 주기적으로 커밋 (메모리 관리)
                 if total_count % 100 == 0:
-                    repo.commit()
-                    if verbose:
-                        print(f"  Progress: {total_count} processed ({insert_count} inserted, {update_count} updated)")
+                    try:
+                        repo.commit()
+                        if verbose:
+                            print(f"  Progress: {total_count} processed ({insert_count} inserted, {update_count} updated)")
+                    except Exception as e:
+                        repo.session.rollback()
+                        if verbose:
+                            print(f"  Error committing batch: {e}")
+                        raise
                 
-            except Exception as e:
+            except ValueError as e:
+                # 예상된 에러 (Crystal 등, 기본 스탯 없는 몬스터)
                 error_count += 1
+                if verbose and "no base stats" in str(e).lower():
+                    # Crystal 등은 조용히 스킵
+                    pass
+                elif verbose:
+                    print(f"  Skipping {monster_data.get('name', 'Unknown')}: {e}")
+                continue
+            except Exception as e:
+                # 예상치 못한 에러
+                error_count += 1
+                repo.session.rollback()  # 에러 발생 시 rollback
                 if verbose:
                     print(f"  Error processing monster {monster_data.get('name', 'Unknown')}: {e}")
                 continue
         
         # 최종 커밋
-        repo.commit()
+        try:
+            repo.commit()
+        except Exception as e:
+            repo.session.rollback()
+            if verbose:
+                print(f"  Error in final commit: {e}")
+            raise
         
         elapsed = time.time() - start_time
         
