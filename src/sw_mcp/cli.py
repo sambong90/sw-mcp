@@ -113,7 +113,7 @@ def cmd_ruleset_seed(args):
     repo = SwarfarmRepository()
     
     try:
-        from ..rules.seed import seed_ruleset
+        from .rules.seed import seed_ruleset
         
         ruleset = seed_ruleset(repo, version=args.version, overlay_path=overlay_path)
         
@@ -163,7 +163,7 @@ def cmd_ruleset_show(args):
     repo = SwarfarmRepository()
     
     try:
-        from ..rules.loader import load_ruleset_from_db
+        from .rules.loader import load_ruleset_from_db
         
         if args.version:
             ruleset = load_ruleset_from_db(repo, version_tag=args.version)
