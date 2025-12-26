@@ -148,6 +148,70 @@ stats = registry.get(name="Lushen")
 stats = registry.get(name="루쉔")
 ```
 
+## Rules-as-Data 시스템
+
+게임 룰을 구조화된 데이터로 표현하고 버전 관리하는 시스템입니다.
+
+### 개념
+
+- **버전 관리**: 규칙셋은 버전 태그로 관리되며, 패치별로 업데이트 가능
+- **소스 추적**: 각 규칙의 출처(SWARFARM, 오버레이 파일, 수동 입력) 추적
+- **감사 가능**: 규칙 변경 이력 및 신뢰도 정보 저장
+- **데이터 기반**: 하드코딩된 상수 대신 규칙셋에서 로드
+
+### 규칙셋 스키마
+
+규칙셋은 다음을 포함합니다:
+
+- **RuneRules**: 슬롯별 메인/서브 합법성, 특수 규칙
+- **SetRules**: 세트 보너스 수치 (2-set, 4-set)
+- **GemGrindRules**: 젬/그라인드 적합성 및 캡
+- **SubstatsRules**: 서브스탯 범위 (일반/고대)
+- **ContentRules**: 콘텐츠별 제한 (스텁)
+
+### 사용법
+
+```bash
+# 규칙셋 시드 (초기 생성)
+python -m src.sw_mcp.cli ruleset-seed --version v1.0.0 --overlay src/sw_mcp/rules/overlays/rune_numeric_rules_v1.json
+
+# 규칙셋 검증
+python -m src.sw_mcp.cli ruleset-validate --version v1.0.0
+
+# 규칙셋 조회
+python -m src.sw_mcp.cli ruleset-show --version v1.0.0
+```
+
+### 규칙셋 업데이트
+
+1. 오버레이 파일 수정 (`src/sw_mcp/rules/overlays/rune_numeric_rules_v1.json`)
+2. 새 버전으로 시드: `ruleset-seed --version v1.1.0`
+3. 현재 규칙셋 업데이트: DB의 `current_ruleset` 테이블 업데이트
+
+### 규칙 엔진 사용
+
+```python
+from src.sw_mcp.rules.loader import load_ruleset_from_db
+from src.sw_mcp.rules.engine import RulesEngine
+from src.sw_mcp.db.repo import SwarfarmRepository
+
+# 규칙셋 로드
+repo = SwarfarmRepository()
+ruleset = load_ruleset_from_db(repo)  # 최신 또는 특정 버전
+
+# 엔진 생성
+engine = RulesEngine(ruleset)
+
+# 룬 검증
+is_valid, error = engine.validate_rune(rune)
+
+# 빌드 검증
+is_valid, error = engine.validate_build(runes)
+
+# 세트 보너스 적용
+stats = engine.apply_set_bonus(stats, runes)
+```
+
 ## SWARFARM API v2 전체 데이터 수집 시스템
 
 SWARFARM API v2의 모든 엔드포인트를 동적으로 발견하고, 모든 리소스를 DB에 raw JSON으로 저장하는 범용 수집 시스템입니다.

@@ -104,6 +104,94 @@ def cmd_sync(args):
         repo.close()
 
 
+def cmd_ruleset_seed(args):
+    """Seed ruleset"""
+    db_url = args.db_url or os.getenv("SW_MCP_DB_URL", DB_URL)
+    overlay_path = args.overlay or None
+    
+    SwarfarmRepository.create_tables(db_url)
+    repo = SwarfarmRepository()
+    
+    try:
+        from ..rules.seed import seed_ruleset
+        
+        ruleset = seed_ruleset(repo, version=args.version, overlay_path=overlay_path)
+        
+        print(f"Ruleset {ruleset.version} seeded successfully!")
+        print(f"  Effective date: {ruleset.metadata.effective_date}")
+        print(f"  Sources: {len(ruleset.metadata.sources)}")
+        print(f"  Sets defined: {len(ruleset.set_rules.sets)}")
+    finally:
+        repo.close()
+
+
+def cmd_ruleset_validate(args):
+    """Validate ruleset schema"""
+    if args.file:
+        from ..rules.loader import load_ruleset_from_json
+        try:
+            ruleset = load_ruleset_from_json(args.file)
+            print(f"Ruleset {ruleset.version} is valid!")
+            print(f"  Effective date: {ruleset.metadata.effective_date}")
+            print(f"  Sets: {len(ruleset.set_rules.sets)}")
+            print(f"  Gem/Grind stats: {len(ruleset.gem_grind_rules.gem_allowed_stats)}")
+        except Exception as e:
+            print(f"Validation failed: {e}")
+            sys.exit(1)
+    elif args.version:
+        db_url = args.db_url or os.getenv("SW_MCP_DB_URL", DB_URL)
+        repo = SwarfarmRepository()
+        try:
+            from ..rules.loader import load_ruleset_from_db
+            ruleset = load_ruleset_from_db(repo, version_tag=args.version)
+            if ruleset:
+                print(f"Ruleset {ruleset.version} is valid!")
+                print(f"  Effective date: {ruleset.metadata.effective_date}")
+            else:
+                print(f"Ruleset {args.version} not found")
+                sys.exit(1)
+        finally:
+            repo.close()
+    else:
+        print("Error: Must specify --file or --version")
+        sys.exit(1)
+
+
+def cmd_ruleset_show(args):
+    """Show ruleset"""
+    db_url = args.db_url or os.getenv("SW_MCP_DB_URL", DB_URL)
+    repo = SwarfarmRepository()
+    
+    try:
+        from ..rules.loader import load_ruleset_from_db
+        
+        if args.version:
+            ruleset = load_ruleset_from_db(repo, version_tag=args.version)
+        else:
+            current_version = repo.get_current_ruleset_version()
+            if not current_version:
+                print("No current ruleset set")
+                sys.exit(1)
+            ruleset = load_ruleset_from_db(repo, version_tag=current_version)
+        
+        if not ruleset:
+            print(f"Ruleset not found")
+            sys.exit(1)
+        
+        print(f"Ruleset: {ruleset.version}")
+        print(f"  Effective date: {ruleset.metadata.effective_date}")
+        print(f"  Patch version: {ruleset.metadata.patch_version or 'N/A'}")
+        print(f"  Confidence: {ruleset.metadata.confidence or 'N/A'}")
+        print(f"  Sources:")
+        for source in ruleset.metadata.sources:
+            print(f"    - {source.type}: {source.url or source.notes or 'N/A'}")
+        print(f"  Sets: {len(ruleset.set_rules.sets)}")
+        print(f"  Gem/Grind stats: {len(ruleset.gem_grind_rules.gem_allowed_stats)}")
+        print(f"  Substats ranges: {len(ruleset.substats_rules.ranges)}")
+    finally:
+        repo.close()
+
+
 def main():
     """Main CLI entrypoint"""
     parser = argparse.ArgumentParser(description="SWARFARM API v2 ingestion CLI")
@@ -122,12 +210,35 @@ def main():
     sync_parser.add_argument("--max-pages", type=int, help="Max pages per endpoint (debug)")
     sync_parser.add_argument("--no-changelog", action="store_true", help="Disable change logging")
     
+    # Ruleset seed command
+    seed_parser = subparsers.add_parser("ruleset-seed", help="Seed ruleset")
+    seed_parser.add_argument("--version", type=str, default="v1.0.0", help="Version tag")
+    seed_parser.add_argument("--overlay", type=str, help="Path to overlay JSON file")
+    seed_parser.add_argument("--db-url", type=str, help=f"DB URL (default: {DB_URL})")
+    
+    # Ruleset validate command
+    validate_parser = subparsers.add_parser("ruleset-validate", help="Validate ruleset")
+    validate_parser.add_argument("--file", type=str, help="Path to ruleset JSON file")
+    validate_parser.add_argument("--version", type=str, help="Version tag from DB")
+    validate_parser.add_argument("--db-url", type=str, help=f"DB URL (default: {DB_URL})")
+    
+    # Ruleset show command
+    show_parser = subparsers.add_parser("ruleset-show", help="Show ruleset")
+    show_parser.add_argument("--version", type=str, help="Version tag (default: current)")
+    show_parser.add_argument("--db-url", type=str, help=f"DB URL (default: {DB_URL})")
+    
     args = parser.parse_args()
     
     if args.command == "swarfarm-discover":
         cmd_discover(args)
     elif args.command == "swarfarm-sync":
         cmd_sync(args)
+    elif args.command == "ruleset-seed":
+        cmd_ruleset_seed(args)
+    elif args.command == "ruleset-validate":
+        cmd_ruleset_validate(args)
+    elif args.command == "ruleset-show":
+        cmd_ruleset_show(args)
     else:
         parser.print_help()
         sys.exit(1)

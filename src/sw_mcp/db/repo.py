@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
-from .models import SwarfarmRaw, SwarfarmSyncState, SwarfarmChangeLog, SwarfarmSnapshot, Base
+from .models import SwarfarmRaw, SwarfarmSyncState, SwarfarmChangeLog, SwarfarmSnapshot, RulesetVersion, CurrentRuleset, Base
 from .engine import get_engine, get_session
 
 

@@ -88,3 +88,30 @@ class SwarfarmSnapshot(Base):
     
     def __repr__(self):
         return f"<SwarfarmSnapshot(id={self.id}, started_at={self.started_at})>"
+
+
+class RulesetVersion(Base):
+    """Versioned ruleset storage"""
+    __tablename__ = "ruleset_versions"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    version_tag = Column(String(50), unique=True, nullable=False, index=True)
+    effective_date = Column(String(20), nullable=False)  # YYYY-MM-DD
+    rules_json = Column(Text, nullable=False)  # Complete ruleset JSON
+    sources_json = Column(Text, nullable=True)  # Sources metadata JSON
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<RulesetVersion(version_tag='{self.version_tag}', effective_date='{self.effective_date}')>"
+
+
+class CurrentRuleset(Base):
+    """Pointer to current active ruleset"""
+    __tablename__ = "current_ruleset"
+    
+    id = Column(Integer, primary_key=True)
+    version_tag = Column(String(50), nullable=False, unique=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<CurrentRuleset(version_tag='{self.version_tag}')>"
