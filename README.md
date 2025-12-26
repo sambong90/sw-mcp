@@ -54,6 +54,15 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+### 환경변수 (선택)
+
+```bash
+# DB URL 설정 (기본값: sqlite:///sw_mcp.db)
+export SW_MCP_DB_URL="sqlite:///sw_mcp.db"
+# 또는 PostgreSQL
+export SW_MCP_DB_URL="postgresql://user:password@localhost/sw_mcp"
+```
+
 ### Docker Compose (프로덕션)
 
 ```bash
@@ -102,6 +111,268 @@ alembic upgrade head
 docker-compose up api
 ```
 
+## 몬스터 데이터팩
+
+### 초기 설정
+
+1. **CSV 데이터팩 로드 (DB에 seed)**
+   ```bash
+   python -m src.sw_api.manage seed-monsters data/monsters_v1.csv
+   ```
+
+2. **DB에서 CSV로 export**
+   ```bash
+   python -m src.sw_api.manage export-monsters output.csv
+   ```
+
+### 데이터 소스 우선순위
+
+1. **DB (운영 기본)**: `sqlite:///sw_mcp.db` 또는 설정된 DB
+2. **CSV 데이터팩**: `data/monsters*.csv` (버전 관리)
+3. **원격 공급자**: 추후 구현 예정
+
+### 레지스트리 사용
+
+```python
+from src.sw_core.monster_registry import get_registry
+
+# 레지스트리 초기화
+registry = get_registry(data_dirs=["data"])
+
+# master_id로 조회
+stats = registry.get(master_id=14105)  # 루쉔
+print(f"ATK: {stats.base_atk}, SPD: {stats.base_spd}")
+
+# 이름으로 조회 (대소문자/공백 무시)
+stats = registry.get(name="Lushen")
+stats = registry.get(name="루쉔")
+```
+
+## Rules-as-Data 시스템
+
+게임 룰을 구조화된 데이터로 표현하고 버전 관리하는 시스템입니다.
+
+### 개념
+
+- **버전 관리**: 규칙셋은 버전 태그로 관리되며, 패치별로 업데이트 가능
+- **소스 추적**: 각 규칙의 출처(SWARFARM, 오버레이 파일, 수동 입력) 추적
+- **감사 가능**: 규칙 변경 이력 및 신뢰도 정보 저장
+- **데이터 기반**: 하드코딩된 상수 대신 규칙셋에서 로드
+
+### 규칙셋 스키마
+
+규칙셋은 다음을 포함합니다:
+
+- **RuneRules**: 슬롯별 메인/서브 합법성, 특수 규칙
+- **SetRules**: 세트 보너스 수치 (2-set, 4-set)
+- **GemGrindRules**: 젬/그라인드 적합성 및 캡
+- **SubstatsRules**: 서브스탯 범위 (일반/고대)
+- **ContentRules**: 콘텐츠별 제한 (스텁)
+
+### 사용법
+
+```bash
+# 규칙셋 시드 (초기 생성)
+python -m src.sw_mcp.cli ruleset-seed --version v1.0.0 --overlay src/sw_mcp/rules/overlays/rune_numeric_rules_v1.json
+
+# 규칙셋 검증
+python -m src.sw_mcp.cli ruleset-validate --version v1.0.0
+
+# 규칙셋 조회
+python -m src.sw_mcp.cli ruleset-show --version v1.0.0
+```
+
+### 규칙셋 업데이트
+
+1. 오버레이 파일 수정 (`src/sw_mcp/rules/overlays/rune_numeric_rules_v1.json`)
+2. 새 버전으로 시드: `ruleset-seed --version v1.1.0`
+3. 현재 규칙셋 업데이트: DB의 `current_ruleset` 테이블 업데이트
+
+### 규칙 엔진 사용
+
+```python
+from src.sw_mcp.rules.loader import load_ruleset_from_db
+from src.sw_mcp.rules.engine import RulesEngine
+from src.sw_mcp.db.repo import SwarfarmRepository
+
+# 규칙셋 로드
+repo = SwarfarmRepository()
+ruleset = load_ruleset_from_db(repo)  # 최신 또는 특정 버전
+
+# 엔진 생성
+engine = RulesEngine(ruleset)
+
+# 룬 검증
+is_valid, error = engine.validate_rune(rune)
+
+# 빌드 검증
+is_valid, error = engine.validate_build(runes)
+
+# 세트 보너스 적용
+stats = engine.apply_set_bonus(stats, runes)
+```
+
+## SWARFARM API v2 전체 데이터 수집 시스템
+
+SWARFARM API v2의 모든 엔드포인트를 동적으로 발견하고, 모든 리소스를 DB에 raw JSON으로 저장하는 범용 수집 시스템입니다.
+
+### 주요 기능
+
+- **동적 엔드포인트 발견**: API root에서 모든 엔드포인트를 자동 발견
+- **Raw JSON 저장**: 정규화 없이 원본 JSON 저장 (스키마 변경에 견고)
+- **증분 업데이트**: Hash 기반으로 변경된 객체만 업데이트
+- **HTTP 요청 최소화**: ETag/Last-Modified로 304 Not Modified 활용
+- **견고한 에러 처리**: Rate limit, 재시도, 백오프 지원
+- **일일 자동화**: OS 스케줄러 또는 APScheduler 지원
+
+### 초기 동기화
+
+```bash
+# 모든 엔드포인트 발견 및 동기화
+python -m src.sw_mcp.cli swarfarm-sync --all
+
+# 특정 엔드포인트만 동기화
+python -m src.sw_mcp.cli swarfarm-sync --endpoint monsters
+
+# 엔드포인트 목록 확인
+python -m src.sw_mcp.cli swarfarm-discover
+```
+
+### 옵션
+
+- `--db-url <URL>`: DB URL (기본값: 환경변수 `SW_MCP_DB_URL` 또는 `sqlite:///sw_mcp.db`)
+- `--rps <N>`: Rate limit (초당 요청 수, 기본값: 2.0)
+- `--max-pages <N>`: 최대 페이지 수 (디버그용)
+- `--no-changelog`: Change log 비활성화
+
+### 증분 업데이트 작동 방식
+
+1. **Hash 기반 변경 감지**: 각 객체의 canonical JSON을 SHA256 해시로 저장
+2. **304 Not Modified**: ETag/Last-Modified 헤더로 변경 없으면 전체 스킵
+3. **Upsert 로직**:
+   - 새 객체: INSERT
+   - Hash 변경: UPDATE
+   - Hash 동일: NO-OP (변경 없음)
+
+### HTTP 요청 최소화
+
+- **ETag 지원**: `If-None-Match` 헤더로 조건부 요청
+- **Last-Modified 지원**: `If-Modified-Since` 헤더로 조건부 요청
+- **304 응답**: 변경 없으면 전체 pagination 스킵
+- **Rate Limiting**: 초당 요청 수 제한 (기본 2 RPS)
+
+### 견고성
+
+- **재시도**: 429/5xx 에러 시 exponential backoff + jitter (최대 6회)
+- **Rate Limit**: 환경변수 `SW_MCP_HTTP_RPS`로 제어
+- **방어적 파싱**: 필드 누락/스키마 변경에 견고
+
+### 일일 자동화
+
+#### A) OS 스케줄러 (권장)
+
+**Linux (cron):**
+```bash
+# 매일 새벽 4시 실행
+0 4 * * * cd /path/to/sw-mcp && python -m src.sw_mcp.cli swarfarm-sync --all
+```
+
+**Windows (Task Scheduler):**
+- 작업 스케줄러에서 새 작업 생성
+- 트리거: 매일 04:00
+- 작업: `python -m src.sw_mcp.cli swarfarm-sync --all`
+
+#### B) APScheduler (선택)
+
+```bash
+# 환경변수 설정
+export SW_MCP_ENABLE_SCHEDULER=1
+export SW_MCP_SCHEDULE_HOUR=4
+export SW_MCP_SCHEDULE_TIMEZONE=Asia/Seoul
+
+# 스케줄러 실행 (프로세스가 계속 실행되어야 함)
+python -m src.sw_mcp.scheduler
+```
+
+### DB 스키마
+
+**swarfarm_raw**: Raw JSON 저장
+- `endpoint`, `object_id` (PK)
+- `com2us_id` (인덱스)
+- `payload_json` (canonical JSON)
+- `payload_hash` (SHA256)
+- `source_url`, `fetched_at`
+
+**swarfarm_sync_state**: 엔드포인트별 동기화 상태
+- `endpoint` (PK)
+- `list_url`, `etag`, `last_modified`
+- `last_run_at`, `last_success_at`, `last_count`, `last_error`
+
+**swarfarm_change_log**: 변경 이력 (선택)
+- `endpoint`, `object_id`, `change_type` (insert/update)
+- `old_hash`, `new_hash`, `changed_at`
+
+**swarfarm_snapshot**: 동기화 실행 요약
+- 실행 시간, 통계 (inserted/updated/unchanged/errors)
+
+## SWARFARM 몬스터 기본 스탯 DB 동기화 (레거시)
+
+SWARFARM API를 통해 모든 몬스터의 기본 스탯을 DB에 저장하여, 룬 최적화 시 자동으로 사용할 수 있습니다.
+
+> **참고**: 이 기능은 새로운 전체 수집 시스템으로 대체되었습니다. 위의 `swarfarm-sync --all` 명령을 사용하세요.
+
+### 초기 동기화
+
+```bash
+# 전체 몬스터 데이터 동기화 (수천 개, 시간 소요)
+python -m src.sw_mcp.sync_swarfarm monsters
+
+# 옵션:
+# --db <DB_URL>: DB URL 지정 (기본값: 환경변수 SW_MCP_DB_URL 또는 sqlite:///sw_mcp.db)
+# --sleep-ms <ms>: 요청 간 슬립 시간 (기본값: 100ms, rate limit 방지)
+# --max-pages <N>: 최대 페이지 수 (디버그용)
+# --quiet: 상세 출력 비활성화
+
+# 예시:
+python -m src.sw_mcp.sync_swarfarm monsters --sleep-ms 200 --max-pages 5
+```
+
+### 동기화 결과
+
+- 모든 몬스터의 기본 스탯이 `monster_base` 테이블에 저장됩니다
+- `com2us_id` 기준으로 업서트되므로, 재실행 시 업데이트됩니다
+- 동기화 후 룬 최적화에서 몬스터 기본 스탯을 자동으로 사용할 수 있습니다
+
+### 몬스터 기본 스탯 조회
+
+```python
+from src.sw_mcp.monster_base import get_base_stats, get_base_stats_safe
+
+# com2us_id로 조회 (SWEX unit_master_id와 동일)
+stats = get_base_stats(14105)  # 루쉔
+if stats:
+    print(f"ATK: {stats['base_attack']}, SPD: {stats['speed']}")
+
+# Fallback 지원 (DB에 없으면 기본값 사용)
+stats = get_base_stats_safe(
+    14105,
+    fallback={"base_attack": 900, "speed": 104}
+)
+```
+
+### DB 스키마
+
+`monster_base` 테이블:
+- `com2us_id` (UNIQUE): SWEX unit_master_id 매칭 키
+- `swarfarm_id`: SWARFARM API의 id
+- `name`, `element`, `archetype`
+- `base_hp`, `base_attack`, `base_defense`, `speed`
+- `crit_rate`, `crit_damage`, `resistance`, `accuracy`
+- `base_stars`, `natural_stars`, `awaken_level`
+- `family_id`, `skill_group_id`
+- `skills_json`: 스킬 리스트 (JSON)
+- `updated_at_local`: 최종 업데이트 시각
+
 ## 사용법
 
 ### 기본 API (run_search)
@@ -132,44 +403,60 @@ from src.sw_core.swex_parser import load_swex_json
 
 runes = load_swex_json("swex_export.json")
 
-# 예시 1: 루쉔 (공격형)
+# 예시 1: 몬스터 레지스트리 사용 (권장)
+result = run_search(
+    runes=runes,
+    monster={"master_id": 14105},  # 루쉔 (base stats 자동 조회)
+    constraints={"CR": 100, "SPD": 100, "ATK_TOTAL": 2000},
+    set_constraints={"Fatal": 4, "Blade": 2},
+    objective="SCORE",
+    mode="exhaustive",
+    top_n=20
+)
+
+# 이름으로도 조회 가능
+result = run_search(
+    runes=runes,
+    monster={"name": "Lushen"},  # 또는 {"name": "루쉔"}
+    constraints={"CR": 100}
+)
+
+# 예시 2: 수동 base stats 지정 (레거시 호환)
 result = run_search(
     runes=runes,
     base_atk=900,
     base_spd=104,
     constraints={"CR": 100, "SPD": 100, "ATK_TOTAL": 2000},
-    set_constraints={"Fatal": 4, "Blade": 2},  # 맹공+칼날
+    set_constraints={"Fatal": 4, "Blade": 2},
     objective="SCORE",
-    mode="exhaustive",  # 정확도 100% 보장
+    mode="exhaustive",
     top_n=20
 )
 
-# 예시 2: 모든 세트 허용 (SWOP-like)
+# 예시 3: 모든 세트 허용 (SWOP-like)
 result = run_search(
     runes=runes,
-    base_atk=900,
-    base_spd=104,
+    monster={"master_id": 14105},
     constraints={"CR": 100, "SPD": 100},
     set_constraints=None,  # 모든 세트 허용
     objective="SCORE",
     mode="exhaustive"
 )
 
-# 예시 3: 탱커 (체력/방어 중심)
+# 예시 4: 탱커 (체력/방어 중심)
 result = run_search(
     runes=runes,
-    base_hp=15000,
-    base_def=800,
+    monster={"name": "베라드"},  # 또는 master_id 사용
     constraints={"HP_TOTAL": 30000, "DEF_TOTAL": 1500},
-    set_constraints={"Energy": 2, "Guard": 2},  # 에너지+가드
-    objective="EHP",  # Effective HP
+    set_constraints={"Energy": 2, "Guard": 2},
+    objective="EHP",
     mode="exhaustive"
 )
 
-# 예시 4: 모든 조건 만족 빌드 반환
+# 예시 5: 모든 조건 만족 빌드 반환
 result = run_search(
     runes=runes,
-    base_atk=900,
+    monster={"master_id": 14105},
     constraints={"CR": 100, "SPD": 100},
     return_all=True  # 모든 빌드 반환 (메모리 주의)
 )

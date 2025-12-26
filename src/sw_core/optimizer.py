@@ -357,6 +357,7 @@ def check_set_constraints(state: DPState, set_constraints: Dict[str, int],
 def check_constraints(state: DPState, constraints: Dict[str, float], 
                      slot_runes: Dict[int, List[Rune]], current_slot: int,
                      base_atk: int, base_spd: int, base_hp: int, base_def: int,
+                     base_cr: int = BASE_CR, base_cd: int = BASE_CD,
                      set_constraints: Dict[str, int] = None) -> bool:
     """제약 조건을 만족할 수 있는지 확인 (pruning)"""
     # 세트 제약조건 체크
@@ -366,7 +367,8 @@ def check_constraints(state: DPState, constraints: Dict[str, float],
     if not constraints:
         return True
     
-    # 현재까지의 스탯 (기본값 포함)
+    # 현재까지의 스탯 (기본값 포함, base_cr/base_cd는 함수 파라미터로 받아야 하지만
+    # pruning 단계에서는 최악의 경우를 가정하므로 BASE_CR/BASE_CD 사용)
     current_cr = BASE_CR + state.cr
     current_cd = BASE_CD + state.cd
     current_spd = base_spd + state.spd
@@ -424,6 +426,8 @@ def search_builds(runes: List[Rune],
                   base_spd: int = 104,
                   base_hp: int = 10000,
                   base_def: int = 500,
+                  base_cr: int = BASE_CR,
+                  base_cd: int = BASE_CD,
                   constraints: Dict[str, float] = None,
                   set_constraints: Dict[str, int] = None,
                   objective: str = "SCORE",
@@ -533,7 +537,7 @@ def search_builds(runes: List[Rune],
         
         # Feasibility pruning: 제약 조건을 만족할 수 없으면 가지치기 (exhaustive 모드에서도 사용)
         if not check_constraints(state, constraints, slot_runes, current_slot - 1, 
-                                 base_atk, base_spd, base_hp, base_def, set_constraints):
+                                 base_atk, base_spd, base_hp, base_def, base_cr, base_cd, set_constraints):
             return
         
         if current_slot > 6:
@@ -554,6 +558,8 @@ def search_builds(runes: List[Rune],
                 base_spd=base_spd,
                 base_hp=base_hp,
                 base_def=base_def,
+                base_cr=base_cr,
+                base_cd=base_cd,
                 constraints=constraints,
                 set_constraints=set_constraints
             )
