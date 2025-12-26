@@ -90,7 +90,7 @@ def sync_endpoint(
             )
             repo.commit()
             if verbose:
-                print(f"  ✓ {endpoint_name}: 304 Not Modified (no changes)")
+                print(f"  [OK] {endpoint_name}: 304 Not Modified (no changes)")
             return stats
         
         # 200 OK: process pagination
@@ -172,7 +172,7 @@ def sync_endpoint(
         repo.commit()
         
         if verbose:
-            print(f"  ✓ {endpoint_name}: {stats['inserted']} inserted, {stats['updated']} updated, {stats['unchanged']} unchanged, {stats['errors']} errors")
+            print(f"  [OK] {endpoint_name}: {stats['inserted']} inserted, {stats['updated']} updated, {stats['unchanged']} unchanged, {stats['errors']} errors")
     
     except Exception as e:
         stats["errors"] += 1
@@ -185,7 +185,7 @@ def sync_endpoint(
         )
         repo.rollback()
         if verbose:
-            print(f"  ✗ {endpoint_name}: Error - {e}")
+            print(f"  [ERROR] {endpoint_name}: Error - {e}")
     
     return stats
 
@@ -226,7 +226,7 @@ def sync_all(
             print()
     except Exception as e:
         if verbose:
-            print(f"  ✗ Discovery failed: {e}")
+            print(f"  [ERROR] Discovery failed: {e}")
         stats.errors_total += 1
         return stats
     
