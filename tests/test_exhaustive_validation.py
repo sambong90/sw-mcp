@@ -182,3 +182,4 @@ def test_exhaustive_vs_fast_completeness():
     if result_exhaustive["total_found"] > 0 and result_fast["total_found"] > 0:
         assert result_exhaustive["results"][0]["score"] >= result_fast["results"][0]["score"]
 
+

@@ -38,3 +38,4 @@ def test_compute_hash_different_objects():
     
     assert hash1 != hash2
 
+

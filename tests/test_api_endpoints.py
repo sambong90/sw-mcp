@@ -297,3 +297,4 @@ def test_get_search_results_not_completed(client, sample_swex_json, tmp_path):
         if os.path.exists(temp_file):
             os.unlink(temp_file)
 
+

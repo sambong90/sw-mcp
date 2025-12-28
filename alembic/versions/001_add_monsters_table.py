@@ -43,3 +43,4 @@ def downgrade():
     op.drop_index(op.f('ix_monsters_master_id'), table_name='monsters')
     op.drop_table('monsters')
 
+

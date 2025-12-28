@@ -12,3 +12,4 @@ COPY src/ ./src/
 # Run worker
 CMD python -m src.sw_worker.cli
 
+

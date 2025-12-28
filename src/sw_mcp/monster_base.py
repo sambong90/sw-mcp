@@ -69,3 +69,4 @@ def get_base_stats_safe(com2us_id: int, fallback: Dict[str, Any] = None, db_url:
         "accuracy": 0.0,
     }
 
+

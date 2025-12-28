@@ -120,3 +120,4 @@ def test_run_search_default_stats(sample_runes):
     assert "results" in result
     # 기본값 사용 (base_atk=900, base_spd=104 등)
 
+

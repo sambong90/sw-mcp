@@ -92,3 +92,4 @@ def downgrade():
     op.drop_index('idx_swarfarm_raw_endpoint', table_name='swarfarm_raw')
     op.drop_table('swarfarm_raw')
 
+

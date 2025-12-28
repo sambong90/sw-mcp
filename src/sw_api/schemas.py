@@ -78,3 +78,4 @@ class SearchResultsResponse(BaseModel):
     total_found: int
     results: List[BuildResultResponse]
 
+

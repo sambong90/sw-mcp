@@ -37,3 +37,4 @@ def test_discover_endpoints(mock_root_response):
         
         client.close()
 
+

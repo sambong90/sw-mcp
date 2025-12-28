@@ -145,3 +145,4 @@ for result in results:
 3. Gem/Grind 모드 구현
 4. 병렬 처리 지원
 
+

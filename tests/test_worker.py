@@ -139,3 +139,4 @@ def test_run_search_job_cancellation(db_session, sample_import):
             db_session.refresh(search_job)
             assert search_job.status == JobStatus.CANCELLED
 
+

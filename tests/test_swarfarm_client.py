@@ -134,3 +134,4 @@ def test_swarfarm_client_pagination(sample_monster_page):
         
         client.close()
 
+

@@ -45,3 +45,4 @@ def compute_hash_from_json(json_str: str) -> str:
     obj = json.loads(json_str)
     return compute_hash(obj)
 
+

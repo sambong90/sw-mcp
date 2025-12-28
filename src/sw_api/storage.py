@@ -78,3 +78,4 @@ class StorageManager:
 # Global storage manager instance
 storage_manager = StorageManager()
 
+

@@ -138,3 +138,4 @@ def test_exhaustive_no_heuristic_pruning():
         assert exhaustive_best >= fast_best, \
             f"Exhaustive best score {exhaustive_best} < fast best score {fast_best}"
 
+

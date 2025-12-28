@@ -143,3 +143,4 @@ python -m pytest tests/test_exhaustive.py -v
 - 원격 저장소: https://github.com/sambong90/sw-mcp
 - PR 생성: https://github.com/sambong90/sw-mcp/pull/new/exhaustive-search
 
+

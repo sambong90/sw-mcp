@@ -142,3 +142,4 @@ def test_get_by_com2us_id(temp_db):
     
     repo.close()
 
+

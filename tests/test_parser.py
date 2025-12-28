@@ -1,4 +1,4 @@
-"""?�서 ?�스??""
+"""?�서 ?�스??""
 
 import json
 import pytest
@@ -7,7 +7,7 @@ from src.sw_core.types import Rune
 
 
 def test_parse_rune_intangible():
-    """무형 �??�싱 ?�스??(set_id=25)"""
+    """무형 �??�싱 ?�스??(set_id=25)"""
     raw_rune = {
         "rune_id": 12345,
         "slot_no": 1,
@@ -30,7 +30,7 @@ def test_parse_rune_intangible():
 
 
 def test_parse_rune_with_grind():
-    """?�마가 ?�함??�??�싱 ?�스??""
+    """?�마가 ?�함??�??�싱 ?�스??""
     raw_rune = {
         "rune_id": 12346,
         "slot_no": 2,
@@ -60,7 +60,7 @@ def test_parse_rune_with_grind():
 
 
 def test_parse_swex_json_merge():
-    """rune_list?� unit_list 병합 ?�스??""
+    """rune_list?� unit_list 병합 ?�스??""
     json_data = {
         "runes": [
             {
@@ -73,7 +73,7 @@ def test_parse_swex_json_merge():
                 "rank": 5
             }
         ],
-        "unit_list": [  # unit_list ?�선 ?�인
+        "unit_list": [  # unit_list ?�선 ?�인
             {
                 "runes": [
                     {
@@ -86,7 +86,7 @@ def test_parse_swex_json_merge():
                         "rank": 5
                     },
                     {
-                        "rune_id": 100,  # 중복 (rune_list?�도 ?�음)
+                        "rune_id": 100,  # 중복 (rune_list?�도 ?�음)
                         "slot_no": 1,
                         "set_id": 5,
                         "pri_eff": [4, 63],
@@ -97,7 +97,7 @@ def test_parse_swex_json_merge():
                 ]
             }
         ],
-        "units": [  # units???�인
+        "units": [  # units???�인
             {
                 "runes": [
                     {
@@ -117,16 +117,16 @@ def test_parse_swex_json_merge():
     runes = parse_swex_json(json_data)
     rune_ids = [r.rune_id for r in runes]
     
-    # 중복 ?�거 ?�인 �?unit_list ?�기 ?�인
+    # 중복 ?�거 ?�인 �?unit_list ?�기 ?�인
     assert len(runes) == 3
     assert 100 in rune_ids
     assert 200 in rune_ids
     assert 300 in rune_ids
-    assert rune_ids.count(100) == 1  # 중복 ?�음
+    assert rune_ids.count(100) == 1  # 중복 ?�음
 
 
 def test_parse_rune_prefix_eff():
-    """prefix_eff ?�싱 ?�스??""
+    """prefix_eff ?�싱 ?�스??""
     raw_rune = {
         "rune_id": 12347,
         "slot_no": 1,

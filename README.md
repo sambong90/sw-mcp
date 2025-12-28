@@ -211,6 +211,134 @@ result = run_search(
 streamlit run ui/app.py
 ```
 
+## MCP 서버 설정 및 사용법
+
+### MCP (Model Context Protocol) 서버
+
+MCP 서버를 통해 LLM 클라이언트(Cursor 등)에서 룬 최적화 기능을 사용할 수 있습니다.
+
+#### 설치
+
+```bash
+# 의존성 설치
+pip install -r requirements.txt
+
+# MCP 패키지 설치 확인
+python -c "import mcp; print('MCP OK')"
+```
+
+#### 환경 변수 설정
+
+`.env.example`을 복사하여 `.env` 파일 생성:
+
+```bash
+cp .env.example .env
+```
+
+`.env` 파일 수정:
+- `SW_MCP_DB_URL`: 데이터베이스 URL (기본: SQLite)
+- `SW_MCP_HTTP_RPS`: HTTP 요청 제한 (기본: 2)
+- `SW_MCP_ENABLE_SCHEDULER`: 스케줄러 활성화 (0 또는 1)
+
+#### MCP 서버 실행
+
+```bash
+python -m sw_mcp_server.server
+```
+
+서버가 실행되면 다음 tools를 사용할 수 있습니다:
+- `load_swex`: SWEX JSON 파일 로드
+- `search_builds`: 룬 빌드 탐색
+- `export_results`: 결과 내보내기
+- `reset_state`: 서버 상태 초기화
+
+#### 로컬 테스트 (MCP 클라이언트)
+
+```bash
+# MCP 클라이언트 테스트 스크립트 실행
+python scripts/mcp_client_test.py --json 테오니아-1164562.json
+```
+
+이 스크립트는:
+1. SWEX JSON 파일 로드
+2. A) Rage 4 + Blade 2 탐색 (CR >= 100)
+3. B) Fatal 4 + Blade 2 탐색 (CR >= 100)
+4. 결과를 `out/` 폴더에 저장
+
+#### Cursor에서 MCP 사용
+
+**자동 설정 (권장):**
+```bash
+# Cursor MCP 설정 자동 추가
+python scripts/setup_cursor_mcp.py --force
+```
+
+이 스크립트는 Cursor 설정 파일(`%APPDATA%\Cursor\User\settings.json`)에 MCP 서버 설정을 자동으로 추가합니다.
+
+**수동 설정:**
+1. Cursor 설정 파일 열기: `%APPDATA%\Cursor\User\settings.json`
+2. 다음 설정 추가:
+```json
+{
+  "mcpServers": {
+    "sw-mcp-server": {
+      "command": "python",
+      "args": ["-m", "sw_mcp_server.server"],
+      "cwd": "C:\\sw-mcp",
+      "env": {
+        "PYTHONPATH": "C:\\sw-mcp\\src"
+      }
+    }
+  }
+}
+```
+
+**사용 방법:**
+1. Cursor 재시작 (설정 적용)
+2. Cursor 설정에서 MCP 서버가 활성화되었는지 확인
+3. 자연어로 요청:
+   - "테오니아 JSON을 로드하고 루쉔 최적 빌드를 찾아줘"
+   - "CR 100 이상, Rage 4 + Blade 2 조합으로 탐색해줘"
+   - "SWEX 파일을 로드하고 베라드 최적 탱커 빌드를 찾아줘"
+
+### 데이터베이스 마이그레이션
+
+```bash
+# Alembic 마이그레이션 실행
+alembic upgrade head
+```
+
+### 자동 업데이트 스케줄러
+
+#### A) OS 스케줄러 (권장)
+
+**WSL/Linux (cron):**
+```bash
+# 매일 새벽 4시 실행
+0 4 * * * cd /path/to/sw-mcp && . .venv/bin/activate && python -m sw_mcp.cli swarfarm-sync --all >> logs/sync.log 2>&1
+```
+
+**Windows (작업 스케줄러):**
+- 작업 스케줄러에서 새 작업 생성
+- 트리거: 매일 04:00
+- 작업: WSL bash 실행
+  ```bash
+  wsl bash -c "cd /mnt/c/sw-mcp && source .venv/bin/activate && python -m sw_mcp.cli swarfarm-sync --all"
+  ```
+
+#### B) 앱 내부 스케줄러 (APScheduler)
+
+```bash
+# 환경변수 설정
+export SW_MCP_ENABLE_SCHEDULER=1
+export SW_MCP_SCHEDULE_HOUR=4
+
+# 스케줄러 실행 (프로세스가 계속 실행되어야 함)
+python -m sw_mcp.scheduler
+```
+
+⚠️ **주의**: 앱 내부 스케줄러는 프로세스가 실행 중일 때만 동작합니다.
+
 ## Rules-as-Data 시스템
 
 게임 룰을 구조화된 데이터로 표현하고 버전 관리하는 시스템입니다.

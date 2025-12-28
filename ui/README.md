@@ -28,3 +28,4 @@ API_BASE_URL = "http://localhost:8000"
 3. **결과 보기**: Job progress, Results table, Build detail view
 4. **내보내기**: JSON/CSV 형식으로 결과 다운로드
 
+

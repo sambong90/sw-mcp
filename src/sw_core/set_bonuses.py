@@ -81,3 +81,4 @@ def load_set_bonuses_from_ruleset(ruleset) -> Dict[int, SetBonusDefinition]:
     
     return result
 
+

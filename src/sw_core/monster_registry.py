@@ -184,6 +184,50 @@ class MonsterRegistry:
         
         return stats
     
+    def search(self, query: str, limit: int = 50) -> List[MonsterBaseStats]:
+        """
+        몬스터 이름으로 부분 일치 검색
+        
+        Args:
+            query: 검색어 (한 글자 이상)
+            limit: 최대 결과 수
+        
+        Returns:
+            일치하는 몬스터 리스트 (정규화된 이름 기준)
+        """
+        if not query or len(query.strip()) == 0:
+            return []
+        
+        # 캐시가 비어있으면 CSV 로드
+        if not self._cache:
+            self.warm_cache()
+        
+        query_normalized = self._normalize_name(query)
+        results = []
+        
+        # 모든 캐시된 몬스터 검색
+        for master_id, stats in self._cache.items():
+            # 한글 이름 검색
+            if stats.name_ko:
+                normalized_ko = self._normalize_name(stats.name_ko)
+                if query_normalized in normalized_ko:
+                    results.append(stats)
+                    if len(results) >= limit:
+                        break
+                    continue
+            
+            # 영문 이름 검색
+            if stats.name_en:
+                normalized_en = self._normalize_name(stats.name_en)
+                if query_normalized in normalized_en:
+                    # 중복 체크 (이미 한글 이름으로 추가되었을 수 있음)
+                    if stats not in results:
+                        results.append(stats)
+                        if len(results) >= limit:
+                            break
+        
+        return results
+    
     def get_default(self) -> MonsterBaseStats:
         """기본값 반환 (몬스터 미지정 시)"""
         return MonsterBaseStats(
@@ -218,4 +262,5 @@ def set_registry(registry: MonsterRegistry):
     """전역 레지스트리 설정"""
     global _global_registry
     _global_registry = registry
+
 

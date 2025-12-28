@@ -39,3 +39,4 @@ def discover_endpoints(client: SwarfarmClient) -> List[Tuple[str, str]]:
     
     return endpoints
 
+

@@ -330,3 +330,4 @@ def test_exhaustive_objective_sorting():
             assert results[i]["atk_total"] >= results[i + 1]["atk_total"], \
                 f"ATK_TOTAL not sorted: {results[i]['atk_total']} < {results[i + 1]['atk_total']}"
 
+

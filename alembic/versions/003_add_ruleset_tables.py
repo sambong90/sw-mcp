@@ -47,3 +47,4 @@ def downgrade():
     op.drop_index('idx_ruleset_versions_version_tag', table_name='ruleset_versions')
     op.drop_table('ruleset_versions')
 
+

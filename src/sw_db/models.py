@@ -44,3 +44,4 @@ def get_session(db_url: str = "sqlite:///sw_mcp.db"):
     Session = sessionmaker(bind=engine)
     return Session()
 
+

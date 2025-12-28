@@ -68,3 +68,4 @@ class BuildResult(Base):
     def __repr__(self):
         return f"<BuildResult(job_id={self.job_id}, rank={self.rank}, score={self.score})>"
 
+

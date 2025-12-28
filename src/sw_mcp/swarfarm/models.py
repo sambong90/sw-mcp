@@ -11,3 +11,4 @@ class ListResponse(BaseModel):
     previous: Optional[str] = None
     results: List[Dict[str, Any]]
 
+

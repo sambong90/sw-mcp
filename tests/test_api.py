@@ -1,4 +1,4 @@
-"""API ?�스??""
+"""API ?�스??""
 
 import pytest
 from src.sw_core.api import run_search, run_search_from_json
@@ -6,7 +6,7 @@ from src.sw_core.types import Rune, SubStat
 
 
 def create_test_rune(rune_id, slot, set_id, main_stat_id, main_value, subs=None, prefix_stat_id=0, prefix_stat_value=0.0):
-    """?�스?�용 �??�성"""
+    """?�스?�용 �??�성"""
     if subs is None:
         subs = []
     return Rune(
@@ -24,7 +24,7 @@ def create_test_rune(rune_id, slot, set_id, main_stat_id, main_value, subs=None,
 
 
 def test_run_search_basic():
-    """기본 run_search ?�스??""
+    """기본 run_search ?�스??""
     runes = []
     
     for slot in range(1, 7):
@@ -62,7 +62,7 @@ def test_run_search_basic():
 
 
 def test_run_search_with_constraints():
-    """?�약 조건???�는 run_search ?�스??""
+    """?�약 조건???�는 run_search ?�스??""
     runes = []
     
     for slot in range(1, 7):
@@ -100,12 +100,12 @@ def test_run_search_with_constraints():
 
 
 def test_run_search_exhaustive_vs_fast():
-    """Exhaustive 모드가 fast 모드보다 ??많�? 결과�?찾는지 ?�스??""
+    """Exhaustive 모드가 fast 모드보다 ??많�? 결과�?찾는지 ?�스??""
     runes = []
     
-    # ?�롯???�러 �??�성
+    # ?�롯???�러 �??�성
     for slot in range(1, 7):
-        for i in range(3):  # ?�롯??3�?
+        for i in range(3):  # ?�롯??3�?
             if slot == 2 or slot == 6:
                 main_stat_id = 4
                 main_value = 63
@@ -139,12 +139,12 @@ def test_run_search_exhaustive_vs_fast():
         top_n=100
     )
     
-    # Exhaustive가 fast보다 같거????많�? 결과�?찾아????
+    # Exhaustive가 fast보다 같거????많�? 결과�?찾아????
     assert result_exhaustive["total_found"] >= result_fast["total_found"]
 
 
 def test_run_search_from_json():
-    """run_search_from_json ?�스??""
+    """run_search_from_json ?�스??""
     json_data = {
         "runes": [
             {
@@ -173,7 +173,7 @@ def test_run_search_from_json():
 
 
 def test_run_search_objective_sorting():
-    """Objective???�른 ?�렬 ?�스??""
+    """Objective???�른 ?�렬 ?�스??""
     runes = []
     
     for slot in range(1, 7):
@@ -195,7 +195,7 @@ def test_run_search_objective_sorting():
         )
         runes.append(rune)
     
-    # ATK_TOTAL 기�? ?�렬
+    # ATK_TOTAL 기�? ?�렬
     result = run_search(
         runes=runes,
         target="B",
@@ -210,10 +210,10 @@ def test_run_search_objective_sorting():
 
 
 def test_run_search_require_sets_false():
-    """require_sets=False ?�스??""
+    """require_sets=False ?�스??""
     runes = []
     
-    # ?�양???�트??�??�성 (?�트 조건 불만�?
+    # ?�양???�트??�??�성 (?�트 조건 불만�?
     for slot in range(1, 7):
         if slot == 2 or slot == 6:
             main_stat_id = 4
@@ -233,7 +233,7 @@ def test_run_search_require_sets_false():
         )
         runes.append(rune)
     
-    # require_sets=False�?결과가 ?�어????
+    # require_sets=False�?결과가 ?�어????
     result = run_search(
         runes=runes,
         target="B",
@@ -243,4 +243,5 @@ def test_run_search_require_sets_false():
     )
     
     assert result["total_found"] > 0
+
 
